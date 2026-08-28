@@ -2,10 +2,14 @@
 
 ## Prerequisites
 
-- macOS 14+ with **Xcode 26.x** (command-line tools included).
+- macOS 14+ with **Xcode 26.6 (build 17F113)** for release-reproducible builds.
 - **XcodeGen 2.46.0** to generate `SangKey.xcodeproj` from
   `platform/macos/project.yml`.
 - Python 3 only if you intentionally regenerate dictionaries.
+
+CI and release select `/Applications/Xcode_26.6.app` and verify both the marketing
+version and build number before compiling. A toolchain upgrade must therefore be a
+reviewed source change instead of an implicit hosted-runner update.
 
 CI does not install XcodeGen through Homebrew. It downloads the exact 2.46.0
 release archive and verifies SHA-256 before execution. Local development may use
@@ -54,7 +58,7 @@ xcodebuild \
   build
 ```
 
-An unsigned Debug build is useful for compile/linkage work, but the hosted CI
+An unsigned Debug build is useful for compile/linkage work, but hosted CI
 intentionally does not exercise real Accessibility or `SMAppService`
 registration because those require user-session TCC/background-item approval.
 The deterministic CI agent smoke skips only the event tap while loading the real
@@ -74,16 +78,21 @@ For an installed, signed build:
 5. Close the control app. `SangKeyAgent` should remain running and typing should
    continue.
 6. Reopen `SangKey.app` only to change preferences or enable/disable the agent.
+7. Reboot/login once and confirm the registered agent returns without reopening
+   the control app.
+8. Disable and re-enable the agent from the control menu and confirm the setting
+   survives reopening the control app.
 
 Only run one event-based Vietnamese IME at a time. A Debug build and an installed
 release use the same LaunchAgent label/agent identity in v0.4, so do **not**
 register both simultaneously. Disable/unregister the installed agent before live
-Testing a Debug package.
+testing a Debug package.
 
 Accessibility persistence depends on stable signed code identity. Release
 packaging explicitly signs `SangKeyAgent` with identifier
-`com.sangtrx.sangkey.agent`; ad-hoc rebuilds are not a substitute for testing the
-real Developer ID artifact before release.
+`com.sangtrx.sangkey.agent`, requires a Developer ID Application signer, and
+verifies the expected Apple Team Identifier. Ad-hoc rebuilds are not a substitute
+for testing the real Developer ID artifact before release.
 
 ## Dictionaries
 
@@ -103,15 +112,15 @@ The production agent resolves these files beside itself in
 `.github/workflows/ci.yml` runs two independent jobs on pull requests and `main`:
 
 - Ubuntu: engine, sanitizer and source/security invariants.
-- macOS 26: Xcode build, launcher/agent linkage audit, embedded dictionary smoke,
-  agent idle-RSS budget, universal `arm64 + x86_64` packaging, nested-code-sign
-  identity verification and DMG verification.
+- macOS 26: exact-Xcode verification, Xcode build, launcher/agent linkage audit,
+  embedded dictionary smoke, agent idle-RSS budget, universal `arm64 + x86_64`
+  packaging, nested-code-sign identity verification and DMG verification.
 
 The always-on agent must stay below **30 MiB idle RSS** in the deterministic CI
 smoke and may not link AppKit, ServiceManagement or Swift runtime machinery.
 
-`.github/workflows/release.yml` runs only on a strict version tag and signs,
-notarizes and publishes a universal DMG. See [`RELEASE.md`](RELEASE.md).
+`.github/workflows/release.yml` runs only on a strict protected version tag and
+refuses to sign unless `main` is protected. See [`RELEASE.md`](RELEASE.md).
 
 ## Packaging / distribution
 
@@ -129,9 +138,9 @@ SANGKEY_ARCHS="arm64 x86_64" bash tools/package.sh
 
 `tools/package.sh` regenerates the Xcode project, builds both products, verifies
 the embedded agent + LaunchAgent descriptor, signs the nested agent first with
-its explicit code identifier, signs the enclosing app, then creates the DMG.
-Without notarization credentials it prints that the local package is not
-notarized.
+its explicit code identifier, signs the enclosing app, copies `LICENSE.txt`,
+`NOTICE.txt`, and exact-source `SOURCE.txt`, then creates the DMG. A notarized
+build must pass `stapler` and Gatekeeper `spctl` before the script succeeds.
 
 Code signing and notarization require an Apple Developer account. For the
 automated Developer ID + notarization release flow, see [`RELEASE.md`](RELEASE.md).
