@@ -5,6 +5,7 @@
 
 static NSString * const kRepoReleases = @"https://github.com/sangtrx/SangKey/releases/latest";
 static NSString * const kAgentPlist = @"com.sangtrx.sangkey.agent.plist";
+static NSString * const kAgentDesiredEnabled = @"agentDesiredEnabled";
 
 @interface SangKeyAppDelegate : NSObject <NSApplicationDelegate>
 - (void)rebuildMenu;
@@ -36,7 +37,7 @@ static void LauncherPreferencesChanged(CFNotificationCenterRef center,
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
 
     _agentService = [SMAppService agentServiceWithPlistName:kAgentPlist];
-    [self ensureAgentRegistered];
+    [self ensureAgentRegistrationMatchesIntent];
 
     CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
                                     (__bridge const void *)self,
@@ -65,7 +66,8 @@ static void LauncherPreferencesChanged(CFNotificationCenterRef center,
                                        NULL);
 }
 
-- (void)ensureAgentRegistered {
+- (void)ensureAgentRegistrationMatchesIntent {
+    if (!SangKeyPreferenceBool(kAgentDesiredEnabled)) return;
     if (_agentService.status != SMAppServiceStatusNotRegistered) return;
     NSError *error = nil;
     if (![_agentService registerAndReturnError:&error]) {
@@ -187,8 +189,10 @@ static void LauncherPreferencesChanged(CFNotificationCenterRef center,
 
 - (void)enableAgent:(id)sender {
     (void)sender;
+    SangKeySetPreferenceBool(kAgentDesiredEnabled, YES);
     NSError *error = nil;
-    if (![_agentService registerAndReturnError:&error]) {
+    if (_agentService.status == SMAppServiceStatusNotRegistered &&
+        ![_agentService registerAndReturnError:&error]) {
         NSLog(@"SangKey: enable agent failed: %@", error);
     }
     [self rebuildMenu];
@@ -196,8 +200,10 @@ static void LauncherPreferencesChanged(CFNotificationCenterRef center,
 
 - (void)disableAgent:(id)sender {
     (void)sender;
+    SangKeySetPreferenceBool(kAgentDesiredEnabled, NO);
     NSError *error = nil;
-    if (![_agentService unregisterAndReturnError:&error]) {
+    if (_agentService.status != SMAppServiceStatusNotRegistered &&
+        ![_agentService unregisterAndReturnError:&error]) {
         NSLog(@"SangKey: disable agent failed: %@", error);
     }
     [self rebuildMenu];
