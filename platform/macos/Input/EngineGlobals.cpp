@@ -43,7 +43,7 @@ int vAutoDetectEnglish = 1;
 // macOS-local options (NOT declared in core/engine/Engine.h). These mirror the
 // extra knobs OpenKey defines in its app layer and are referenced by the ported
 // input core in InputController.mm. They are owned by the host app; the settings
-// layer (T10) may update them at runtime.
+// layer may update them at runtime.
 // ---------------------------------------------------------------------------
 
 // Send each character as its own CGEvent instead of one batched unicode string.
@@ -54,13 +54,14 @@ int vFixChromiumBrowser = 0;
 // Map the pressed key through the active keyboard layout before handing it to
 // the engine (helps non-QWERTY layouts). Off by default.
 int vPerformLayoutCompat = 0;
-// Spotlight (and similar async fields) drop injected backspaces; the AX
-// atomic-replace path is implemented in T14. Defined here so the ported code
-// compiles; the AX behavior itself is intentionally not implemented yet.
+// Spotlight and similar system-search fields can drop injected backspaces. The
+// default-ON AX atomic-replace/select-and-overwrite path handles those fields
+// without changing the ordinary-app send path.
 int vFixSpotlight = 1;
 // Web browsers (the omnibox and in-page editors like Google Docs) are async and
-// mishandle a plain backspace+insert fired in one burst, corrupting transforms
-// such as the doubled-tone restore "garr" -> "gar" (seen as "gảar"). When on,
-// browser corrections use the OpenKey-style empty-char prefix (U+202F) + paced
-// backspaces. On by default; escape hatch if a future web app regresses.
+// can mishandle a plain backspace+insert fired in one burst, corrupting
+// transforms such as the doubled-tone restore "garr" -> "gar" (seen as
+// "gảar"). When on, browser corrections use an empty-char prefix (U+202F) plus
+// paced backspaces. On by default, with a Settings escape hatch if a future web
+// app or browser version regresses.
 int vFixWebContentEditor = 1;
