@@ -57,23 +57,20 @@ targets:
     dependencies:
       - sdk: AppKit.framework
       - sdk: ServiceManagement.framework
+      # XcodeGen copies tool dependencies into Contents/Resources automatically.
       - target: SangKeyAgent
         link: false
     postBuildScripts:
-      - name: Embed headless input agent
+      - name: Embed bundled LaunchAgent descriptor
         basedOnDependencyAnalysis: false
         inputFiles:
-          - "$(BUILT_PRODUCTS_DIR)/SangKeyAgent"
           - "$(SRCROOT)/Agent/com.sangtrx.sangkey.agent.plist"
         outputFiles:
-          - "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/SangKeyAgent"
           - "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchAgents/com.sangtrx.sangkey.agent.plist"
         script: |
           set -euo pipefail
-          RESOURCES="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
           LAUNCH_AGENTS="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Library/LaunchAgents"
-          mkdir -p "$RESOURCES" "$LAUNCH_AGENTS"
-          install -m 755 "$BUILT_PRODUCTS_DIR/SangKeyAgent" "$RESOURCES/SangKeyAgent"
+          mkdir -p "$LAUNCH_AGENTS"
           install -m 644 "$SRCROOT/Agent/com.sangtrx.sangkey.agent.plist" \
             "$LAUNCH_AGENTS/com.sangtrx.sangkey.agent.plist"
     settings:
