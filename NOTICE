@@ -20,13 +20,19 @@ core typing logic that makes accurate Vietnamese input possible.
 Third-party data
 ----------------
 
-1. English common-word corpus
-   Source: Darius Kazemi Corpora, data/words/common.json
+1. English detector corpora
+   Source: Darius Kazemi Corpora
    https://github.com/dariusk/corpora
    Pinned upstream commit: cf30ca27ab176b63623af1ddcfa2447ac07305ba
-   Pinned Git blob: 8ec4ea53704dfca63f1ee00852c6bcc15411c49e
+
+   - data/words/common.json
+     Git blob: 8ec4ea53704dfca63f1ee00852c6bcc15411c49e
+   - data/words/nouns.json
+     Git blob: aca4efb20de9becfd3f949c73e97297be26574f4
+
    License: Creative Commons CC0 1.0 Universal.
-   Used as the auditable common-word base for automatic English detection.
+   These byte-pinned files form the auditable external-data base for automatic
+   English detection.
 
    The small SangKey-maintained English detector supplement is kept separately
    in core/data/english_supplement.dat and is dedicated to CC0 1.0 by SangKey
