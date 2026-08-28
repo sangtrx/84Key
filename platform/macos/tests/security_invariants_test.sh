@@ -108,6 +108,54 @@ else
   bad "artifact helper can run while Apple signing material still exists"
 fi
 
+# 10. A tag cannot reach the secret-bearing signing job until a secret-free
+#     preflight proves strict semver, exact main HEAD provenance and the full
+#     source/security gate. This prevents an accidentally tagged side commit from
+#     becoming a perfectly signed malicious or unreviewed binary.
+preflight_block=$(awk '/^  preflight:/,/^  build-sign-notarize:/' "$release")
+if echo "$preflight_block" | grep -q 'refs/remotes/origin/main' && \
+   echo "$preflight_block" | grep -q 'run_tests.sh' && \
+   echo "$preflight_block" | grep -q 'MARKETING_VERSION' && \
+   echo "$preflight_block" | grep -q 'v\[0-9\].*MINOR.PATCH\|strict semver' && \
+   echo "$build_block" | grep -q 'needs: preflight'; then
+  ok "release signing is gated by tested exact-main provenance"
+else
+  bad "release can reach signing without the preflight provenance/test gate"
+fi
+
+# 11. AXIsProcessTrusted() can lag after TCC changes. If the event tap actually
+#     starts, the UI must treat permission as effective rather than stopping its
+#     poll while continuing to display a false missing-permission warning.
+refresh_block=$(awk '/func refresh\(\) -> Bool/,/^    }/' platform/macos/App/AppController.swift)
+if echo "$refresh_block" | grep -Fq 'hasPermission = running || input.hasAccessibilityPermission()'; then
+  ok "a live event tap is treated as effective Accessibility permission"
+else
+  bad "permission UI can disagree with a successfully running event tap"
+fi
+
+# 12. The hardened app must identify this fork as its auditable source while
+#     preserving upstream credit separately. Update navigation already targets
+#     this fork; About must not send a security-conscious user to the wrong tree.
+about=platform/macos/App/Settings/SettingsSections.swift
+if grep -q 'github.com/sangtrx/84Key' "$about" && \
+   grep -q 'Dự án 84Key gốc' "$about" && \
+   grep -q 'github.com/nghialuong/84Key' "$about"; then
+  ok "About links the hardened source and preserves upstream provenance"
+else
+  bad "About does not clearly distinguish hardened source from upstream"
+fi
+
+# 13. Public release artifacts are universal; otherwise an arm64 GitHub runner
+#     silently turns the documented macOS 14+ release into Apple-Silicon-only.
+if grep -q "KEY84_ARCHS: 'arm64 x86_64'" .github/workflows/ci.yml && \
+   grep -q "KEY84_ARCHS: 'arm64 x86_64'" "$release" && \
+   grep -q 'lipo -verify_arch arm64 x86_64' .github/workflows/ci.yml && \
+   grep -q 'lipo -verify_arch arm64 x86_64' "$release"; then
+  ok "CI and release require universal arm64+x86_64 artifacts"
+else
+  bad "release architecture is not explicitly universal and verified"
+fi
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
