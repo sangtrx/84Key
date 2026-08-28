@@ -114,8 +114,15 @@ if [ -n "$cleanup_line" ] && [ -n "$upload_line" ] && [ "$cleanup_line" -lt "$up
 
 check "grep -q 'spctl -a -t open --context context:primary-signature' '$package' && grep -q 'spctl -a -vv --type execute' '$release'" \
       "notarized DMG and mounted app must pass Gatekeeper"
-check "grep -q 'cp \"\\$ROOT/LICENSE\" \"\\$DIST/LICENSE.txt\"' '$package' && grep -q 'cp \"\\$ROOT/NOTICE\" \"\\$DIST/NOTICE.txt\"' '$package' && grep -q 'Corresponding source for this build' '$package' && grep -q 'build/dist/SOURCE.txt' '$ci'" \
-      "DMG carries license, notice and exact corresponding-source pointer"
+if grep -Fq 'cp "$ROOT/LICENSE" "$DIST/LICENSE.txt"' "$package" && \
+   grep -Fq 'cp "$ROOT/NOTICE" "$DIST/NOTICE.txt"' "$package" && \
+   grep -Fq 'cp "$ROOT/core/data/ENGLISH_WORDS_PROVENANCE.md" "$DIST/THIRD_PARTY_DATA.txt"' "$package" && \
+   grep -q 'Corresponding source for this build' "$package" && \
+   grep -q 'build/dist/SOURCE.txt' "$ci"; then
+  ok "DMG carries license, notice, third-party provenance and exact corresponding-source pointer"
+else
+  bad "DMG carries license, notice, third-party provenance and exact corresponding-source pointer"
+fi
 check "grep -q '/usr/bin/base64 -D' '$release' && grep -q 'Smoke-test release credential decoder' '$ci'" \
       "macOS-native credential decoder is smoke tested"
 
