@@ -29,6 +29,6 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSHumanReadableCopyright</key>
-	<string>84Key is free software under the GNU GPLv3. Vietnamese typing engine derived from OpenKey.</string>
+	<string>SangKey is free software under GNU GPLv3. Vietnamese input engine derived from 84Key/OpenKey; see NOTICE.</string>
 </dict>
 </plist>
