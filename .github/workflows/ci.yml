@@ -5,46 +5,67 @@ on:
     branches: [ main ]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   engine-tests:
-    name: Core engine tests (C++)
-    runs-on: ubuntu-latest
+    name: Core + security tests
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      # Pin actions by immutable commit SHA, not a mutable major-version tag.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Compiler version
         run: c++ --version
-      - name: Build and run the engine + English-detection harness
+      - name: Build and run engine, parser sanitizers, and source invariants
         run: bash core/tests/run_tests.sh
 
   macos-app:
     name: Build macOS app
     runs-on: macos-latest
-    if:     github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v4
-      # Build against the macOS 26 SDK (Xcode 26.x), matching the release pipeline
-      # and local dev — the runner defaults to Xcode 16 / macOS 15 SDK. Keeps CI
-      # building the same SDK we ship, so a green build reflects the real product.
-      # Pick the newest installed 26.x so this survives image patch bumps.
-      - name: Select Xcode 26 (macOS 26 SDK)
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode 26
         run: |
           set -euo pipefail
           XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
-          [ -n "$XCODE" ] || { echo "ERROR: no Xcode 26.x found on the runner" >&2; exit 1; }
-          echo "Selecting $XCODE"
+          [ -n "$XCODE" ] || { echo "ERROR: no Xcode 26.x found on runner" >&2; exit 1; }
           sudo xcode-select -s "$XCODE/Contents/Developer"
           xcodebuild -version
-      # The Xcode project is generated from platform/macos/project.yml via
-      # XcodeGen and committed; regenerate so the project always matches the
-      # spec, then build without code signing.
-      - name: Install XcodeGen
-        run: brew install xcodegen
+
+      # Download an immutable XcodeGen release asset and verify the digest
+      # published by GitHub before executing it. This avoids executing a mutable
+      # Homebrew formula inside a privileged release/build environment.
+      - name: Install verified XcodeGen 2.46.0
+        env:
+          XCODEGEN_URL: https://github.com/yonaskolb/XcodeGen/releases/download/2.46.0/xcodegen.zip
+          XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
+        run: |
+          set -euo pipefail
+          ZIP="$RUNNER_TEMP/xcodegen.zip"
+          DEST="$RUNNER_TEMP/xcodegen"
+          curl --fail --location --proto '=https' --tlsv1.2 "$XCODEGEN_URL" -o "$ZIP"
+          printf '%s  %s\n' "$XCODEGEN_SHA256" "$ZIP" | shasum -a 256 -c -
+          mkdir -p "$DEST"
+          unzip -q "$ZIP" -d "$DEST"
+          BIN=$(find "$DEST" -type f -name xcodegen -perm -111 -print -quit)
+          [ -n "$BIN" ] || { echo "ERROR: xcodegen executable missing" >&2; exit 1; }
+          echo "$(dirname "$BIN")" >> "$GITHUB_PATH"
+          "$BIN" --version
+
       - name: Generate Xcode project
         working-directory: platform/macos
         run: xcodegen generate
-      - name: Build app (no code signing)
+
+      - name: Build app without code signing
         working-directory: platform/macos
         run: |
+          set -euo pipefail
           xcodebuild \
             -project 84Key.xcodeproj \
             -scheme 84Key \
