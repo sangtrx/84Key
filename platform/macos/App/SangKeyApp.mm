@@ -1,160 +1,86 @@
 #import <Cocoa/Cocoa.h>
-#import "InputController.h"
+#import <ServiceManagement/ServiceManagement.h>
 
-@interface SangKeyAppDelegate : NSObject <NSApplicationDelegate>
-@end
-
-@implementation SangKeyAppDelegate {
-    InputController *_input;
-    NSStatusItem *_statusItem;
-    NSMenu *_menu;
-    NSTimer *_permissionTimer;
-    id _languageObserver;
-    NSUserDefaults *_defaults;
-}
+#import "SangKeyPreferences.h"
 
 static NSString * const kRepoReleases = @"https://github.com/sangtrx/SangKey/releases/latest";
+static NSString * const kAgentPlist = @"com.sangtrx.sangkey.agent.plist";
+
+@interface SangKeyAppDelegate : NSObject <NSApplicationDelegate>
+- (void)rebuildMenu;
+@end
+
+static void LauncherPreferencesChanged(CFNotificationCenterRef center,
+                                       void *observer,
+                                       CFNotificationName name,
+                                       const void *object,
+                                       CFDictionaryRef userInfo) {
+    (void)center;
+    (void)name;
+    (void)object;
+    (void)userInfo;
+    SangKeyAppDelegate *delegate = (__bridge SangKeyAppDelegate *)observer;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [delegate rebuildMenu];
+    });
+}
+
+@implementation SangKeyAppDelegate {
+    NSStatusItem *_statusItem;
+    NSMenu *_menu;
+    SMAppService *_agentService;
+}
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     (void)notification;
-    unsetenv("KEY84_TRACE");
-
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
-    _defaults = [NSUserDefaults standardUserDefaults];
-    [_defaults registerDefaults:@{
-        @"vLanguage": @1,
-        @"vInputType": @0,
-        @"vCodeTable": @0,
-        @"vFreeMark": @0,
-        @"vCheckSpelling": @1,
-        @"vUseModernOrthography": @1,
-        @"vQuickTelex": @0,
-        @"vRestoreIfWrongSpelling": @0,
-        @"vFixRecommendBrowser": @0,
-        @"vFixWebContentEditor": @1,
-        @"vUseMacro": @0,
-        @"vUseSmartSwitchKey": @0,
-        @"vUpperCaseFirstChar": @0,
-        @"vAllowConsonantZFWJ": @0,
-        @"vQuickStartConsonant": @0,
-        @"vQuickEndConsonant": @0,
-        @"vAutoDetectEnglish": @1,
-        @"vOtherLanguage": @0,
-        @"vFixSpotlight": @1,
-        @"vSendKeyStepByStep": @0,
-        @"vFixChromiumBrowser": @0,
-        @"vPerformLayoutCompat": @0,
-        @"vSwitchKeyStatus": @0x531,
-    }];
 
-    _input = [InputController new];
-    [self applyAllOptions];
-    BOOL dictionariesReady = [_input loadDictionaries];
-    NSLog(@"SangKey dictionaries loaded = %@", dictionariesReady ? @"YES" : @"NO");
+    _agentService = [SMAppService agentServiceWithPlistName:kAgentPlist];
+    [self ensureAgentRegistered];
 
-    __weak SangKeyAppDelegate *weakSelf = self;
-    _languageObserver = [[NSNotificationCenter defaultCenter]
-        addObserverForName:Key84LanguageDidToggleNotification
-                    object:nil
-                     queue:[NSOperationQueue mainQueue]
-                usingBlock:^(NSNotification *note) {
-        SangKeyAppDelegate *strongSelf = weakSelf;
-        if (strongSelf == nil) return;
-        NSNumber *language = note.userInfo[@"language"];
-        if (language != nil) {
-            [strongSelf->_defaults setInteger:language.integerValue forKey:@"vLanguage"];
-            [strongSelf rebuildMenu];
-        }
-    }];
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+                                    (__bridge const void *)self,
+                                    LauncherPreferencesChanged,
+                                    SangKeyPreferencesChangedDarwinNotification,
+                                    NULL,
+                                    CFNotificationSuspensionBehaviorDeliverImmediately);
 
     _statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
     _menu = [NSMenu new];
     _statusItem.menu = _menu;
-
-    // CI footprint mode intentionally stops before TCC/event-tap interaction but
-    // after the real steady-state heap has been created: AppKit status item/menu,
-    // engine globals and both English/Vietnamese dictionaries are resident. This
-    // lets CI measure an apples-to-apples idle RSS without opening a permission
-    // dialog or depending on Accessibility grants on the hosted runner.
-    if (getenv("SANGKEY_CI_SMOKE") != NULL) {
-        [self rebuildMenu];
-        return;
-    }
-
-    [self tryStartInput];
     [self rebuildMenu];
 
-    if (![_input isRunning]) {
-        [self presentAccessibilityAlert];
-        [self startPermissionPolling];
-    }
+    // Make the ephemeral control panel discoverable when launched from Finder.
+    // The menu can be closed immediately; SangKeyAgent continues independently.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self->_statusItem.button performClick:nil];
+    });
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
     (void)notification;
-    [_permissionTimer invalidate];
-    _permissionTimer = nil;
-    if (_languageObserver != nil) {
-        [[NSNotificationCenter defaultCenter] removeObserver:_languageObserver];
-        _languageObserver = nil;
-    }
-    [_input stop];
+    CFNotificationCenterRemoveObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+                                       (__bridge const void *)self,
+                                       SangKeyPreferencesChangedDarwinNotification,
+                                       NULL);
 }
 
-- (void)applyAllOptions {
-    NSArray<NSString *> *keys = @[
-        @"vLanguage", @"vInputType", @"vCodeTable", @"vFreeMark",
-        @"vCheckSpelling", @"vUseModernOrthography", @"vQuickTelex",
-        @"vRestoreIfWrongSpelling", @"vFixRecommendBrowser", @"vFixWebContentEditor",
-        @"vUseMacro", @"vUseSmartSwitchKey", @"vUpperCaseFirstChar",
-        @"vAllowConsonantZFWJ", @"vQuickStartConsonant", @"vQuickEndConsonant",
-        @"vAutoDetectEnglish", @"vOtherLanguage", @"vFixSpotlight",
-        @"vSendKeyStepByStep", @"vFixChromiumBrowser", @"vPerformLayoutCompat",
-        @"vSwitchKeyStatus"
-    ];
-    NSMutableDictionary<NSString *, NSNumber *> *options = [NSMutableDictionary dictionaryWithCapacity:keys.count];
-    for (NSString *key in keys) {
-        options[key] = @([_defaults integerForKey:key]);
-    }
-    [_input applyEngineOptions:options];
-}
-
-- (void)setEngineInteger:(NSInteger)value key:(NSString *)key {
-    [_defaults setInteger:value forKey:key];
-    [_input applyEngineOptions:@{key: @(value)}];
-    [self rebuildMenu];
-}
-
-- (void)setEngineBool:(BOOL)value key:(NSString *)key {
-    [self setEngineInteger:(value ? 1 : 0) key:key];
-}
-
-- (void)tryStartInput {
-    if (![_input isRunning]) {
-        [_input start];
-    }
-    if ([_input isRunning]) {
-        [_permissionTimer invalidate];
-        _permissionTimer = nil;
+- (void)ensureAgentRegistered {
+    if (_agentService.status != SMAppServiceStatusNotRegistered) return;
+    NSError *error = nil;
+    if (![_agentService registerAndReturnError:&error]) {
+        NSLog(@"SangKey: unable to register agent: %@", error);
     }
 }
 
-- (void)startPermissionPolling {
-    if (_permissionTimer != nil) return;
-    _permissionTimer = [NSTimer scheduledTimerWithTimeInterval:1.0
-                                                       target:self
-                                                     selector:@selector(permissionTick:)
-                                                     userInfo:nil
-                                                      repeats:YES];
-}
-
-- (void)permissionTick:(NSTimer *)timer {
-    (void)timer;
-    BOOL wasRunning = [_input isRunning];
-    [self tryStartInput];
-    if (!wasRunning || [_input isRunning]) {
-        [self rebuildMenu];
+- (NSString *)agentStatusText {
+    switch (_agentService.status) {
+        case SMAppServiceStatusEnabled: return @"Bộ gõ nền: Đang bật";
+        case SMAppServiceStatusRequiresApproval: return @"Bộ gõ nền: Cần cho phép";
+        case SMAppServiceStatusNotRegistered: return @"Bộ gõ nền: Đang tắt";
+        case SMAppServiceStatusNotFound: return @"Bộ gõ nền: Không tìm thấy";
     }
+    return @"Bộ gõ nền: Không rõ trạng thái";
 }
 
 - (NSMenuItem *)item:(NSString *)title action:(SEL)action {
@@ -165,23 +91,32 @@ static NSString * const kRepoReleases = @"https://github.com/sangtrx/SangKey/rel
 
 - (NSMenuItem *)toggleItem:(NSString *)title key:(NSString *)key action:(SEL)action {
     NSMenuItem *item = [self item:title action:action];
-    item.state = [_defaults boolForKey:key] ? NSControlStateValueOn : NSControlStateValueOff;
+    item.state = SangKeyPreferenceBool(key) ? NSControlStateValueOn : NSControlStateValueOff;
     return item;
 }
 
 - (void)rebuildMenu {
     if (_menu == nil || _statusItem == nil) return;
 
-    NSInteger language = [_defaults integerForKey:@"vLanguage"];
-    BOOL running = [_input isRunning];
-    _statusItem.button.title = running ? (language == 1 ? @"V" : @"E") : @"!";
-    _statusItem.button.toolTip = running ? @"SangKey" : @"SangKey cần quyền Trợ năng";
+    NSInteger language = SangKeyPreferenceInteger(@"vLanguage");
+    _statusItem.button.title = language == 1 ? @"V" : @"E";
+    _statusItem.button.toolTip = @"SangKey Control — có thể đóng mà bộ gõ vẫn chạy";
 
     [_menu removeAllItems];
-    if (!running && getenv("SANGKEY_CI_SMOKE") == NULL) {
-        [_menu addItem:[self item:@"Cần quyền Trợ năng…" action:@selector(openAccessibility:)]];
-        [_menu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem *status = [[NSMenuItem alloc] initWithTitle:[self agentStatusText] action:nil keyEquivalent:@""];
+    status.enabled = NO;
+    [_menu addItem:status];
+
+    if (_agentService.status == SMAppServiceStatusRequiresApproval) {
+        [_menu addItem:[self item:@"Cho phép chạy nền…" action:@selector(openLoginItems:)]];
+    } else if (_agentService.status == SMAppServiceStatusNotRegistered) {
+        [_menu addItem:[self item:@"Bật bộ gõ nền" action:@selector(enableAgent:)]];
+    } else if (_agentService.status == SMAppServiceStatusEnabled) {
+        [_menu addItem:[self item:@"Tắt bộ gõ nền" action:@selector(disableAgent:)]];
     }
+
+    [_menu addItem:[NSMenuItem separatorItem]];
 
     NSMenuItem *vi = [self item:@"Tiếng Việt" action:@selector(useVietnamese:)];
     vi.state = language == 1 ? NSControlStateValueOn : NSControlStateValueOff;
@@ -190,16 +125,14 @@ static NSString * const kRepoReleases = @"https://github.com/sangtrx/SangKey/rel
     en.state = language == 0 ? NSControlStateValueOn : NSControlStateValueOff;
     [_menu addItem:en];
 
-    [_menu addItem:[NSMenuItem separatorItem]];
-
     NSMenu *inputMenu = [NSMenu new];
     NSArray<NSString *> *inputNames = @[@"Telex", @"VNI", @"Simple Telex 1", @"Simple Telex 2"];
-    NSInteger currentInput = [_defaults integerForKey:@"vInputType"];
+    NSInteger currentInput = SangKeyPreferenceInteger(@"vInputType");
     for (NSInteger index = 0; index < (NSInteger)inputNames.count; index++) {
-        NSMenuItem *item = [self item:inputNames[index] action:@selector(selectInputMethod:)];
-        item.tag = index;
-        item.state = currentInput == index ? NSControlStateValueOn : NSControlStateValueOff;
-        [inputMenu addItem:item];
+        NSMenuItem *input = [self item:inputNames[index] action:@selector(selectInputMethod:)];
+        input.tag = index;
+        input.state = currentInput == index ? NSControlStateValueOn : NSControlStateValueOff;
+        [inputMenu addItem:input];
     }
     NSMenuItem *inputRoot = [[NSMenuItem alloc] initWithTitle:@"Kiểu gõ" action:nil keyEquivalent:@""];
     inputRoot.submenu = inputMenu;
@@ -221,45 +154,64 @@ static NSString * const kRepoReleases = @"https://github.com/sangtrx/SangKey/rel
     [_menu addItem:compatRoot];
 
     [_menu addItem:[NSMenuItem separatorItem]];
-    if (getenv("SANGKEY_CI_SMOKE") == NULL) {
-        [_menu addItem:[self item:@"Mở quyền Trợ năng…" action:@selector(openAccessibility:)]];
-    }
+    [_menu addItem:[self item:@"Mở quyền Trợ năng…" action:@selector(openAccessibility:)]];
+    [_menu addItem:[self item:@"Mở Login Items…" action:@selector(openLoginItems:)]];
     [_menu addItem:[self item:@"Kiểm tra cập nhật…" action:@selector(checkUpdates:)]];
+
     [_menu addItem:[NSMenuItem separatorItem]];
-
-    NSMenuItem *quit = [[NSMenuItem alloc] initWithTitle:@"Thoát SangKey" action:@selector(quit:) keyEquivalent:@"q"];
-    quit.target = self;
-    [_menu addItem:quit];
+    NSMenuItem *close = [[NSMenuItem alloc] initWithTitle:@"Đóng bảng điều khiển (bộ gõ vẫn chạy)"
+                                                   action:@selector(quitControlPanel:)
+                                            keyEquivalent:@"q"];
+    close.target = self;
+    [_menu addItem:close];
 }
 
-- (void)presentAccessibilityAlert {
-    NSAlert *alert = [NSAlert new];
-    alert.alertStyle = NSAlertStyleInformational;
-    alert.messageText = @"Cho phép SangKey xử lý bàn phím";
-    alert.informativeText = @"SangKey cần quyền Trợ năng để gõ tiếng Việt trên toàn hệ thống. Nội dung gõ được xử lý cục bộ và không gửi ra mạng.";
-    [alert addButtonWithTitle:@"Mở Cài đặt Trợ năng"];
-    [alert addButtonWithTitle:@"Để sau"];
-    [NSApp activateIgnoringOtherApps:YES];
-    if ([alert runModal] == NSAlertFirstButtonReturn) {
-        [self openAccessibility:nil];
+- (void)setInteger:(NSInteger)value key:(NSString *)key {
+    SangKeySetPreferenceInteger(key, value);
+    [self rebuildMenu];
+}
+
+- (void)setBool:(BOOL)value key:(NSString *)key {
+    SangKeySetPreferenceBool(key, value);
+    [self rebuildMenu];
+}
+
+- (void)useVietnamese:(id)sender { (void)sender; [self setInteger:1 key:@"vLanguage"]; }
+- (void)useEnglish:(id)sender { (void)sender; [self setInteger:0 key:@"vLanguage"]; }
+- (void)selectInputMethod:(NSMenuItem *)sender { [self setInteger:sender.tag key:@"vInputType"]; }
+- (void)toggleAutoEnglish:(id)sender { (void)sender; [self setBool:!SangKeyPreferenceBool(@"vAutoDetectEnglish") key:@"vAutoDetectEnglish"]; }
+- (void)toggleSpelling:(id)sender { (void)sender; [self setBool:!SangKeyPreferenceBool(@"vCheckSpelling") key:@"vCheckSpelling"]; }
+- (void)toggleModern:(id)sender { (void)sender; [self setBool:!SangKeyPreferenceBool(@"vUseModernOrthography") key:@"vUseModernOrthography"]; }
+- (void)toggleSpotlight:(id)sender { (void)sender; [self setBool:!SangKeyPreferenceBool(@"vFixSpotlight") key:@"vFixSpotlight"]; }
+- (void)toggleWebEditor:(id)sender { (void)sender; [self setBool:!SangKeyPreferenceBool(@"vFixWebContentEditor") key:@"vFixWebContentEditor"]; }
+
+- (void)enableAgent:(id)sender {
+    (void)sender;
+    NSError *error = nil;
+    if (![_agentService registerAndReturnError:&error]) {
+        NSLog(@"SangKey: enable agent failed: %@", error);
     }
+    [self rebuildMenu];
 }
 
-- (void)useVietnamese:(id)sender { (void)sender; [self setEngineInteger:1 key:@"vLanguage"]; }
-- (void)useEnglish:(id)sender { (void)sender; [self setEngineInteger:0 key:@"vLanguage"]; }
-- (void)selectInputMethod:(NSMenuItem *)sender { [self setEngineInteger:sender.tag key:@"vInputType"]; }
-- (void)toggleAutoEnglish:(id)sender { (void)sender; [self setEngineBool:![_defaults boolForKey:@"vAutoDetectEnglish"] key:@"vAutoDetectEnglish"]; }
-- (void)toggleSpelling:(id)sender { (void)sender; [self setEngineBool:![_defaults boolForKey:@"vCheckSpelling"] key:@"vCheckSpelling"]; }
-- (void)toggleModern:(id)sender { (void)sender; [self setEngineBool:![_defaults boolForKey:@"vUseModernOrthography"] key:@"vUseModernOrthography"]; }
-- (void)toggleSpotlight:(id)sender { (void)sender; [self setEngineBool:![_defaults boolForKey:@"vFixSpotlight"] key:@"vFixSpotlight"]; }
-- (void)toggleWebEditor:(id)sender { (void)sender; [self setEngineBool:![_defaults boolForKey:@"vFixWebContentEditor"] key:@"vFixWebContentEditor"]; }
+- (void)disableAgent:(id)sender {
+    (void)sender;
+    NSError *error = nil;
+    if (![_agentService unregisterAndReturnError:&error]) {
+        NSLog(@"SangKey: disable agent failed: %@", error);
+    }
+    [self rebuildMenu];
+}
 
 - (void)openAccessibility:(id)sender {
     (void)sender;
-    [_input requestAccessibilityPermission];
     NSURL *url = [NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"];
     if (url != nil) [[NSWorkspace sharedWorkspace] openURL:url];
-    [self startPermissionPolling];
+}
+
+- (void)openLoginItems:(id)sender {
+    (void)sender;
+    [SMAppService openSystemSettingsLoginItems];
 }
 
 - (void)checkUpdates:(id)sender {
@@ -268,7 +220,7 @@ static NSString * const kRepoReleases = @"https://github.com/sangtrx/SangKey/rel
     if (url != nil) [[NSWorkspace sharedWorkspace] openURL:url];
 }
 
-- (void)quit:(id)sender {
+- (void)quitControlPanel:(id)sender {
     (void)sender;
     [NSApp terminate:nil];
 }
