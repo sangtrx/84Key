@@ -15,10 +15,15 @@ agent=platform/macos/Agent/SangKeyAgent.mm
 ci=.github/workflows/ci.yml
 release=.github/workflows/release.yml
 package=tools/package.sh
+project=platform/macos/project.yml
 readme=README.md
 security=SECURITY.md
 release_docs=docs/RELEASE.md
 changelog=CHANGELOG.md
+notice=NOTICE
+common=core/data/english_common_cc0.json
+supplement=core/data/english_supplement.dat
+provenance=core/data/ENGLISH_WORDS_PROVENANCE.md
 
 if grep -q 'kRepoReleases = @"https://github.com/sangtrx/84Key/releases/latest"' "$app" && \
    grep -q 'Planned canonical post-rename path: https://github.com/sangtrx/SangKey/releases/latest' "$app"; then
@@ -85,12 +90,50 @@ fi
 
 if grep -q 'cp "$ROOT/LICENSE" "$DIST/LICENSE.txt"' "$package" && \
    grep -q 'cp "$ROOT/NOTICE" "$DIST/NOTICE.txt"' "$package" && \
+   grep -q 'ENGLISH_WORDS_PROVENANCE.md.*THIRD_PARTY_DATA.txt' "$package" && \
    grep -q 'Corresponding source for this build' "$package" && \
    grep -q 'build/dist/LICENSE.txt' "$ci" && \
+   grep -q 'build/dist/THIRD_PARTY_DATA.txt' "$ci" && \
    grep -q 'build/dist/SOURCE.txt' "$ci"; then
-  ok "DMG carries license, notice, and exact corresponding-source pointer"
+  ok "DMG carries license, third-party data provenance, notice, and exact source pointer"
 else
-  bad "GPL distribution payload is missing provenance/source material"
+  bad "distribution payload is missing license/provenance/source material"
+fi
+
+EXPECTED_CORPORA_BLOB=8ec4ea53704dfca63f1ee00852c6bcc15411c49e
+EXPECTED_CORPORA_COMMIT=cf30ca27ab176b63623af1ddcfa2447ac07305ba
+if [ "$(git hash-object "$common")" = "$EXPECTED_CORPORA_BLOB" ] && \
+   grep -q "$EXPECTED_CORPORA_BLOB" "$provenance" && \
+   grep -q "$EXPECTED_CORPORA_COMMIT" "$provenance" && \
+   grep -q 'Creative Commons CC0 1.0 Universal' "$provenance" && \
+   grep -q "$EXPECTED_CORPORA_BLOB" "$notice"; then
+  ok "vendored common English corpus is byte-pinned to reviewed CC0 upstream data"
+else
+  bad "English common-word corpus provenance/license drifted"
+fi
+
+if LC_ALL=C sort -cu "$supplement" >/dev/null 2>&1 && \
+   ! grep -nEv '^[a-z]+$' "$supplement" >/dev/null 2>&1 && \
+   grep -Fxq 'google' "$supplement" && \
+   grep -Fxq 'dashboard' "$supplement" && \
+   grep -Fxq 'imagegen' "$supplement" && \
+   grep -Fxq 'assign' "$supplement"; then
+  ok "SangKey English supplement is deterministic, lowercase, and regression-complete"
+else
+  bad "English supplement is malformed or missing required regression vocabulary"
+fi
+
+if ! git ls-files --error-unmatch core/data/english_words.dat >/dev/null 2>&1 && \
+   grep -q 'english_common_cc0.json' "$project" && \
+   grep -q 'english_supplement.dat' "$project" && \
+   ! grep -q 'english_words.dat' "$project" && \
+   grep -q 'english_common_cc0.json' "$agent" && \
+   grep -q 'english_supplement.dat' "$agent" && \
+   ! grep -q 'english_words.dat' "$agent" && \
+   ! grep -Eqi 'first20hours|google-10000-english' "$notice"; then
+  ok "ambiguously licensed legacy English payload cannot re-enter runtime/release"
+else
+  bad "legacy English word-list provenance is still reachable by the product"
 fi
 
 if grep -q 'github.com/sangtrx/84Key/releases' "$readme" && \
