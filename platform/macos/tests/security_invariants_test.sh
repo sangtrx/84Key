@@ -102,17 +102,23 @@ if grep -q '<key>BundleProgram</key>' "$agent_plist" && \
    grep -q '<string>Contents/Resources/SangKeyAgent</string>' "$agent_plist" && \
    grep -q '<key>KeepAlive</key>' "$agent_plist" && \
    grep -q '<string>Aqua</string>' "$agent_plist" && \
-   grep -q 'Contents/Library/LaunchAgents' "$project"; then
+   grep -q 'Library/LaunchAgents/com.sangtrx.sangkey.agent.plist' "$project"; then
   ok "LaunchAgent is bundled inside the app and points at embedded agent"
 else
   bad "bundled LaunchAgent layout is inconsistent"
 fi
 
-if ! grep -R -qE '(^|[^A-Za-z])(launchctl|~/Library/LaunchAgents|/Library/LaunchAgents)' \
-    "$app" "$agent" "$package" "$project"; then
-  ok "runtime/install path does not mutate LaunchAgents or shell out to launchctl"
+manual_launchctl=$(grep -R -nE '(^|[^A-Za-z])launchctl([[:space:]]|$)' \
+    "$app" "$agent" "$package" "$project" || true)
+manual_user_launchagents=$(grep -R -nE '(~|\$HOME|\$\{HOME\})/Library/LaunchAgents|/Users/[^/]+/Library/LaunchAgents' \
+    "$app" "$agent" "$package" "$project" || true)
+manual_system_launchagents=$(grep -R -nE '(^|[[:space:]="/])/Library/LaunchAgents' \
+    "$app" "$agent" "$package" "$project" || true)
+if [ -z "$manual_launchctl" ] && [ -z "$manual_user_launchagents" ] && [ -z "$manual_system_launchagents" ]; then
+  ok "runtime/install path does not mutate user/system LaunchAgents or shell out to launchctl"
 else
-  bad "manual launchctl/LaunchAgents mutation was introduced"
+  printf '%s\n%s\n%s\n' "$manual_launchctl" "$manual_user_launchagents" "$manual_system_launchagents" | sed '/^$/d'
+  bad "manual launchctl or user/system LaunchAgents mutation was introduced"
 fi
 
 if grep -q 'SangKeyPreferencesDomain = @"com.sangtrx.sangkey"' "$prefs" && \
