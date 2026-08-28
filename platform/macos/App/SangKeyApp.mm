@@ -71,6 +71,16 @@ static NSString * const kRepoReleases = @"https://github.com/sangtrx/SangKey/rel
     _menu = [NSMenu new];
     _statusItem.menu = _menu;
 
+    // CI footprint mode intentionally stops before TCC/event-tap interaction but
+    // after the real steady-state heap has been created: AppKit status item/menu,
+    // engine globals and both English/Vietnamese dictionaries are resident. This
+    // lets CI measure an apples-to-apples idle RSS without opening a permission
+    // dialog or depending on Accessibility grants on the hosted runner.
+    if (getenv("SANGKEY_CI_SMOKE") != NULL) {
+        [self rebuildMenu];
+        return;
+    }
+
     [self tryStartInput];
     [self rebuildMenu];
 
@@ -168,7 +178,7 @@ static NSString * const kRepoReleases = @"https://github.com/sangtrx/SangKey/rel
     _statusItem.button.toolTip = running ? @"SangKey" : @"SangKey cần quyền Trợ năng";
 
     [_menu removeAllItems];
-    if (!running) {
+    if (!running && getenv("SANGKEY_CI_SMOKE") == NULL) {
         [_menu addItem:[self item:@"Cần quyền Trợ năng…" action:@selector(openAccessibility:)]];
         [_menu addItem:[NSMenuItem separatorItem]];
     }
@@ -211,7 +221,9 @@ static NSString * const kRepoReleases = @"https://github.com/sangtrx/SangKey/rel
     [_menu addItem:compatRoot];
 
     [_menu addItem:[NSMenuItem separatorItem]];
-    [_menu addItem:[self item:@"Mở quyền Trợ năng…" action:@selector(openAccessibility:)]];
+    if (getenv("SANGKEY_CI_SMOKE") == NULL) {
+        [_menu addItem:[self item:@"Mở quyền Trợ năng…" action:@selector(openAccessibility:)]];
+    }
     [_menu addItem:[self item:@"Kiểm tra cập nhật…" action:@selector(checkUpdates:)]];
     [_menu addItem:[NSMenuItem separatorItem]];
 
