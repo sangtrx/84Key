@@ -1,24 +1,21 @@
-84Key hardened fork
-Copyright (c) 2026 The 84Key Authors and contributors
+SangKey macOS distribution
+Copyright (c) 2026 SangKey contributors
 
 This software is licensed under the GNU General Public License version 3
 (GPLv3). See the LICENSE file for the full license text.
 
-
 Derived work
 ------------
 
-84Key's Vietnamese typing engine is derived from OpenKey
+SangKey is derived from the 84Key macOS project
+(https://github.com/nghialuong/84Key) and preserves its copyright and GPLv3
+obligations.
+
+The Vietnamese typing engine is derived from OpenKey
 (https://github.com/tuyenvm/OpenKey), Copyright (c) Mai Vũ Tuyên,
-licensed under GPLv3. Because the engine is GPLv3, 84Key as a whole is
-also distributed under GPLv3. We gratefully acknowledge the OpenKey
-project for the core typing logic that makes accurate Vietnamese input
-possible.
-
-This hardened fork is derived from nghialuong/84Key
-(https://github.com/nghialuong/84Key). Existing copyright and GPLv3
-obligations from that project are preserved.
-
+licensed under GPLv3. Because the engine is GPLv3, SangKey as a whole is also
+distributed under GPLv3. We gratefully acknowledge the OpenKey project for the
+core typing logic that makes accurate Vietnamese input possible.
 
 Third-party data
 ----------------
@@ -27,20 +24,22 @@ Third-party data
    Source: google-10000-english
    (https://github.com/first20hours/google-10000-english)
    License: Public domain / MIT.
-   Used to power 84Key's automatic English-word detection.
+   Used to power SangKey's automatic English-word detection.
 
 2. Vietnamese syllable dictionary
-   The Vietnamese-by-Telex syllable dictionary is generated from
-   linguistic rules by this project. It is not derived from, and does
-   not incorporate, any external or scraped word list.
-
+   The Vietnamese-by-Telex syllable dictionary is generated from linguistic
+   rules by this project. It is not derived from, and does not incorporate, any
+   external or scraped word list.
 
 Distribution note
 -----------------
 
-The hardened fork does not embed Sparkle or another in-app updater. The
-menu update command opens the fork's GitHub Releases page only after an
-explicit user action. Release-build tooling such as XcodeGen is not
-linked into the application and is covered by its own upstream license.
+SangKey does not embed Sparkle or another in-app updater. The menu update command
+opens the project's GitHub Releases page only after an explicit user action.
+Release-build tooling such as XcodeGen is not linked into the application and is
+covered by its own upstream license.
 
-All fork changes are distributed under GPLv3.
+Public DMGs include LICENSE.txt, NOTICE.txt and SOURCE.txt. SOURCE.txt identifies
+the exact corresponding-source commit for that binary distribution.
+
+All SangKey changes are distributed under GPLv3.
