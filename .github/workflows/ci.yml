@@ -99,8 +99,8 @@ jobs:
 
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" = "com.sangtrx.key84"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "0.2.0"
-          lipo -verify_arch arm64 x86_64 "$BIN"
-          echo "Release architectures: $(lipo -archs "$BIN")"
+          lipo "$BIN" -verify_arch arm64 x86_64
+          echo "Release architectures: $(lipo "$BIN" -archs)"
 
           codesign --verify --strict --verbose=2 "$APP"
           codesign --verify --verbose=2 "$DMG"
