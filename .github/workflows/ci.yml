@@ -64,7 +64,7 @@ jobs:
         working-directory: platform/macos
         run: xcodegen generate
 
-      - name: Build AppKit-only app without code signing
+      - name: Build zero-Swift AppKit host without code signing
         working-directory: platform/macos
         run: |
           set -euo pipefail
@@ -75,21 +75,24 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Verify lightweight runtime linkage
+      - name: Verify ultra-light runtime linkage
         run: |
           set -euo pipefail
           APP=$(find "$HOME/Library/Developer/Xcode/DerivedData" -path '*/Build/Products/Debug/SangKey (DEV).app' -print -quit)
           test -n "$APP"
           BIN="$APP/Contents/MacOS/SangKey (DEV)"
           test -x "$BIN"
+          echo "== linked images =="
           otool -L "$BIN"
-          if otool -L "$BIN" | grep -Eq '/(SwiftUI|Combine)\.framework/'; then
-            echo "ERROR: idle SangKey runtime linked SwiftUI or Combine" >&2
+          if otool -L "$BIN" | grep -Eqi 'SwiftUI|Combine|/libswift|ServiceManagement'; then
+            echo "ERROR: SangKey linked Swift/SwiftUI/Combine/ServiceManagement runtime machinery" >&2
             exit 1
           fi
           test ! -e "$APP/Contents/Resources/EngineUpstream.inc"
-          du -sh "$APP"
-          ls -lh "$BIN"
+          test -z "$(find platform/macos/App platform/macos/Bridge -type f -name '*.swift' -print 2>/dev/null || true)"
+          echo "== footprint =="
+          du -sk "$APP"
+          stat -f '%z bytes binary' "$BIN"
 
       - name: Smoke-test universal Release DMG packaging
         env:
@@ -111,10 +114,12 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" = "com.sangtrx.sangkey"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "0.3.0"
           lipo "$BIN" -verify_arch arm64 x86_64
-          if otool -L "$BIN" | grep -Eq '/(SwiftUI|Combine)\.framework/'; then
-            echo "ERROR: Release binary linked SwiftUI or Combine" >&2
+          if otool -L "$BIN" | grep -Eqi 'SwiftUI|Combine|/libswift|ServiceManagement'; then
+            echo "ERROR: Release binary linked non-minimal runtime machinery" >&2
             exit 1
           fi
+          echo "Release architectures: $(lipo "$BIN" -archs)"
+          echo "Release footprint: $(du -sk "$APP" | awk '{print $1}') KiB app; $(stat -f '%z' "$BIN") byte binary"
           codesign --verify --strict --verbose=2 "$APP"
           codesign --verify --verbose=2 "$DMG"
           hdiutil verify "$DMG"
