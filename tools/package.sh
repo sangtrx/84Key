@@ -7,6 +7,7 @@ MACOS="$ROOT/platform/macos"
 BUILD="$ROOT/build"
 CONFIG="${CONFIG:-Release}"
 APP_NAME="SangKey"
+AGENT_IDENTIFIER="com.sangtrx.sangkey.agent"
 NOTARY_PROFILE="${SANGKEY_NOTARY_PROFILE:-}"
 
 command -v xcodegen >/dev/null 2>&1 || {
@@ -58,10 +59,21 @@ AGENT_PLIST="$APP/Contents/Library/LaunchAgents/com.sangtrx.sangkey.agent.plist"
 [ -f "$AGENT_PLIST" ] || { echo "ERROR: bundled LaunchAgent plist is missing" >&2; exit 1; }
 
 if [ -n "$CODESIGN_IDENTITY" ]; then
-  # Nested executable must be signed before the enclosing app. The always-on
-  # agent gets its own hardened-runtime signature; then the app seals it.
-  codesign --force --options runtime $TS -s "$CODESIGN_IDENTITY" "$AGENT"
+  # A command-line tool does not carry a bundle Info.plist by default, so pin
+  # its code-signing identifier explicitly. This keeps the agent's designated
+  # requirement/TCC identity stable across builds instead of falling back to a
+  # filename-derived identifier.
+  codesign --force --identifier "$AGENT_IDENTIFIER" --options runtime $TS \
+    -s "$CODESIGN_IDENTITY" "$AGENT"
   codesign --verify --strict --verbose=2 "$AGENT"
+  ACTUAL_AGENT_IDENTIFIER="$(codesign -d --verbose=4 "$AGENT" 2>&1 \
+    | awk -F= '/^Identifier=/{print $2; exit}')"
+  [ "$ACTUAL_AGENT_IDENTIFIER" = "$AGENT_IDENTIFIER" ] || {
+    echo "ERROR: SangKeyAgent codesign identifier is '$ACTUAL_AGENT_IDENTIFIER'" >&2
+    exit 1
+  }
+
+  # Sign the enclosing app only after its nested executable has final identity.
   codesign --force --options runtime $TS -s "$CODESIGN_IDENTITY" "$APP"
   codesign --verify --deep --strict --verbose=2 "$APP"
 fi
