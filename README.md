@@ -27,14 +27,19 @@ removes components that are useful for convenience but unnecessary for typing:
   Releases page in the default browser after you click it.
 - **Keystroke trace disabled.** The inherited `KEY84_TRACE` diagnostic switch is
   scrubbed before input interception starts.
-- **Parser hardening.** Legacy macro/smart-switch binary parsers bounds-check all
-  length-prefixed fields and run under ASan/UBSan regression tests.
+- **Sanitizer coverage for real typing paths.** The engine, macOS typing
+  simulation, and malformed legacy parsers run under ASan/UBSan; serialized
+  length-prefixed fields are bounds checked.
 - **Separate app identity.** Release bundle id is `com.sangtrx.key84`; debug is
   `com.sangtrx.key84.debug`, avoiding TCC/code-sign identity collisions with the
   upstream application.
-- **Hardened release chain.** GitHub Actions are immutable-SHA pinned; XcodeGen is
-  exact-version/SHA-256 verified; signing secrets are isolated from the job that
-  has repository write permission; releases include `SHA256SUMS`.
+- **Hardened release chain.** A secret-free gate requires a strict version tag on
+  exact `main` and reruns the security suite before signing; GitHub Actions are
+  immutable-SHA pinned; XcodeGen is exact-version/SHA-256 verified; signing
+  secrets are isolated from the job that has repository write permission;
+  releases include `SHA256SUMS`.
+- **Universal public package.** CI and release require both `arm64` and `x86_64`
+  slices, so the signed DMG supports Apple Silicon and Intel Macs on macOS 14+.
 
 See [`SECURITY.md`](SECURITY.md) for the threat model and
 [`docs/RELEASE.md`](docs/RELEASE.md) for the release security design.
@@ -60,7 +65,8 @@ its own password-field detector.
 - Modern Vietnamese orthography and spelling checks.
 - Automatic English-word detection for mixed Vietnamese/English typing.
 - Spotlight/system-search compatibility handling.
-- Chromium/web-editor compatibility handling.
+- Chromium/web-editor compatibility handling, with a Settings switch to disable
+  the paced web path for a specific browser/editor if needed.
 - Native menu-bar UI with configurable VI/EN switch shortcut.
 - Optional launch at login through Apple's `SMAppService`.
 
@@ -75,17 +81,20 @@ A public release should contain:
 - `84Key-vX.Y.Z.dmg`
 - `SHA256SUMS`
 
-Verify the checksum before installation:
+Public release binaries are expected to be universal (`arm64` + `x86_64`). Verify
+the checksum before installation:
 
 ```sh
 shasum -a 256 -c SHA256SUMS
 ```
 
-For a signed release you can additionally check Gatekeeper/notarization:
+For a signed release you can additionally check Gatekeeper/notarization and the
+architectures inside the mounted app:
 
 ```sh
 xcrun stapler validate 84Key-vX.Y.Z.dmg
 spctl -a -t open --context context:primary-signature 84Key-vX.Y.Z.dmg
+lipo /Volumes/84Key/84Key.app/Contents/MacOS/84Key -archs
 ```
 
 Then open the DMG, drag **84Key** into `/Applications`, launch it, and grant
@@ -103,7 +112,8 @@ Requirements:
 - Xcode 26.x for the same SDK family used by CI/release
 - XcodeGen 2.46.0
 
-Run the C++ engine, parser sanitizer and source-security tests:
+Run the C++ engine, full typing-path sanitizers, parser sanitizer, and
+source-security tests:
 
 ```sh
 bash core/tests/run_tests.sh
@@ -130,7 +140,12 @@ bash tools/package.sh
 
 `tools/package.sh` regenerates the Xcode project from `platform/macos/project.yml`
 before building so the generated project cannot silently retain removed package
-dependencies.
+dependencies. Normal local packaging follows the host architecture; to reproduce
+the universal release build, use:
+
+```sh
+KEY84_ARCHS="arm64 x86_64" bash tools/package.sh
+```
 
 CI does not execute a mutable Homebrew XcodeGen formula: it downloads the exact
 2.46.0 release archive and verifies SHA-256
