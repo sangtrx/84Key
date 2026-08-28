@@ -32,10 +32,11 @@ targets:
     settings:
       base:
         PRODUCT_NAME: "SangKeyAgent"
+        PRODUCT_BUNDLE_IDENTIFIER: com.sangtrx.sangkey.agent
         ENABLE_HARDENED_RUNTIME: YES
         HEADER_SEARCH_PATHS:
-          # Must precede the SDK framework headers: InputController.mm's inherited
-          # <Cocoa/Cocoa.h> import resolves to the narrow three-API headless adapter.
+          # Must precede SDK framework headers. InputController.mm's inherited
+          # <Cocoa/Cocoa.h> import resolves to the narrow no-AppKit adapter.
           - "$(SRCROOT)/HeadlessCompat"
           - "$(SRCROOT)/Shared"
           - "$(SRCROOT)/Input"
@@ -47,11 +48,6 @@ targets:
     sources:
       - path: App/SangKeyApp.mm
       - path: Shared/SangKeyPreferences.mm
-      - path: Agent/com.sangtrx.sangkey.agent.plist
-        buildPhase:
-          copyFiles:
-            destination: wrapper
-            subpath: Contents/Library/LaunchAgents
       - path: ../../core/data/english_words.dat
         buildPhase: resources
       - path: ../../core/data/viet_telex.dat
@@ -63,11 +59,23 @@ targets:
       - sdk: ServiceManagement.framework
       - target: SangKeyAgent
         link: false
-        embed: true
-        codeSign: false
-        copy:
-          destination: wrapper
-          subpath: Contents/Resources
+    postBuildScripts:
+      - name: Embed headless input agent
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          - "$(BUILT_PRODUCTS_DIR)/SangKeyAgent"
+          - "$(SRCROOT)/Agent/com.sangtrx.sangkey.agent.plist"
+        outputFiles:
+          - "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/SangKeyAgent"
+          - "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchAgents/com.sangtrx.sangkey.agent.plist"
+        script: |
+          set -euo pipefail
+          RESOURCES="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
+          LAUNCH_AGENTS="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Library/LaunchAgents"
+          mkdir -p "$RESOURCES" "$LAUNCH_AGENTS"
+          install -m 755 "$BUILT_PRODUCTS_DIR/SangKeyAgent" "$RESOURCES/SangKeyAgent"
+          install -m 644 "$SRCROOT/Agent/com.sangtrx.sangkey.agent.plist" \
+            "$LAUNCH_AGENTS/com.sangtrx.sangkey.agent.plist"
     settings:
       base:
         PRODUCT_NAME: "SangKey"
