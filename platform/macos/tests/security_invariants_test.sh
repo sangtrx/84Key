@@ -8,14 +8,20 @@ fail=0
 ok()  { echo "  [PASS] $1"; pass=$((pass + 1)); }
 bad() { echo "  [FAIL] $1"; fail=$((fail + 1)); }
 
-echo "== SangKey distribution + ultra-light runtime invariants =="
+echo "== SangKey v0.4 split-process security + footprint invariants =="
 
 app=platform/macos/App/SangKeyApp.mm
+agent=platform/macos/Agent/SangKeyAgent.mm
+agent_plist=platform/macos/Agent/com.sangtrx.sangkey.agent.plist
+compat=platform/macos/HeadlessCompat/AppKitCompat.mm
+prefs=platform/macos/Shared/SangKeyPreferences.mm
 project=platform/macos/project.yml
+ci=.github/workflows/ci.yml
 release=.github/workflows/release.yml
+package=tools/package.sh
 
 if grep -R -n -E 'import Sparkle|package: Sparkle|SUFeedURL|SUPublicEDKey|SPUStandardUpdaterController' \
-    "$project" platform/macos/Resources/Info.plist "$app" tools/package.sh "$release" >/dev/null 2>&1; then
+    "$project" platform/macos/Resources/Info.plist "$app" "$agent" "$package" "$release" >/dev/null 2>&1; then
   bad "embedded updater references are present"
 else
   ok "no embedded auto-updater/appcast runtime"
@@ -31,58 +37,162 @@ fi
 
 runtime_sensitive=$(grep -nE \
   'NSURLSession|URLSession|URLRequest|NSURLConnection|NWConnection|CFStream(Create|Open)|socket\(|NSPasteboard|SecItem(CopyMatching|Add|Update|Delete)' \
-  "$app" platform/macos/Input/InputController.mm || true)
-if [ -z "$runtime_sensitive" ]; then ok "runtime has no direct network/clipboard/Keychain client"; else echo "$runtime_sensitive"; bad "sensitive runtime API added"; fi
-
-if awk '/applicationDidFinishLaunching/,/loadDictionaries/' "$app" | grep -q 'unsetenv("KEY84_TRACE")'; then
-  ok "diagnostic key trace is scrubbed before interception"
+  "$agent" platform/macos/Input/InputController.mm "$compat" || true)
+if [ -z "$runtime_sensitive" ]; then
+  ok "always-on input process has no direct network/clipboard/Keychain client"
 else
-  bad "KEY84_TRACE can reach the hardened runtime"
+  echo "$runtime_sensitive"
+  bad "sensitive API added to always-on input process"
+fi
+
+if awk '/int main/,/InputController \*input/' "$agent" | grep -q 'unsetenv("KEY84_TRACE")'; then
+  ok "diagnostic key trace is scrubbed before agent initializes interception"
+else
+  bad "KEY84_TRACE can reach the hardened input agent"
 fi
 
 if grep -q 'PRODUCT_BUNDLE_IDENTIFIER: com.sangtrx.sangkey$' "$project" && \
-   grep -q 'PRODUCT_BUNDLE_IDENTIFIER: com.sangtrx.sangkey.debug$' "$project"; then
-  ok "SangKey uses independent TCC/code-sign identities"
+   grep -q 'PRODUCT_BUNDLE_IDENTIFIER: com.sangtrx.sangkey.debug$' "$project" && \
+   grep -q 'PRODUCT_BUNDLE_IDENTIFIER: com.sangtrx.sangkey.agent$' "$project"; then
+  ok "launcher/debug/agent identities are explicit"
 else
-  bad "SangKey bundle identity is not isolated"
+  bad "SangKey code identities are incomplete"
 fi
 
-swift_sources=$(find platform/macos/App platform/macos/Bridge -type f -name '*.swift' -print 2>/dev/null || true)
-if [ -z "$swift_sources" ] && \
-   grep -q -- '- path: App/SangKeyApp.mm' "$project" && \
-   ! grep -qE 'SWIFT_VERSION|SWIFT_OBJC_BRIDGING_HEADER|ServiceManagement\.framework' "$project"; then
-  ok "macOS host is Objective-C++ only: no Swift, SwiftUI, Combine, bridge, or ServiceManagement"
+swift_sources=$(find platform/macos/App platform/macos/Agent platform/macos/Shared platform/macos/HeadlessCompat \
+  -type f -name '*.swift' -print 2>/dev/null || true)
+if [ -z "$swift_sources" ] && ! grep -qE 'SWIFT_VERSION|SWIFT_OBJC_BRIDGING_HEADER' "$project"; then
+  ok "launcher and agent remain zero-Swift"
 else
   [ -n "$swift_sources" ] && echo "$swift_sources"
-  bad "non-minimal Swift/ServiceManagement host machinery remains"
+  bad "Swift runtime source/build machinery was introduced"
 fi
 
-if grep -q 'NSStatusBar.*statusItemWithLength' "$app" && \
-   grep -q 'NSMenu \*_menu' "$app" && \
-   ! grep -qE 'NSWindowController|NSHosting|NSViewController' "$app"; then
-  ok "idle UI is status-item/menu only; no persistent settings window graph"
+agent_block=$(awk '/^  SangKeyAgent:/,/^  SangKey:/' "$project")
+app_block=$(awk '/^  SangKey:$/,/^schemes:/' "$project")
+if echo "$agent_block" | grep -q 'Foundation.framework' && \
+   echo "$agent_block" | grep -q 'ApplicationServices.framework' && \
+   echo "$agent_block" | grep -q 'Carbon.framework' && \
+   echo "$agent_block" | grep -q 'Security.framework' && \
+   ! echo "$agent_block" | grep -qE 'AppKit.framework|ServiceManagement.framework|SwiftUI|Combine'; then
+  ok "always-on agent build graph excludes AppKit/ServiceManagement/Swift UI"
 else
-  bad "idle UI gained persistent window/view-controller machinery"
+  bad "always-on agent build graph is not headless"
 fi
 
-if grep -q 'NSAlert \*alert' "$app" && ! grep -q 'Onboarding' "$project"; then
-  ok "first-run permission prompt is transient AppKit NSAlert"
+if echo "$app_block" | grep -q 'AppKit.framework' && \
+   echo "$app_block" | grep -q 'ServiceManagement.framework' && \
+   ! echo "$app_block" | grep -q 'path: Input' && \
+   ! echo "$app_block" | grep -q '../../core/engine'; then
+  ok "ephemeral control app owns UI/login registration but not the typing engine"
 else
-  bad "first-run UI can retain a heavyweight onboarding graph"
+  bad "control app and input engine are not cleanly separated"
 fi
 
-if ! grep -R -qE 'ServiceManagement|SMAppService|runOnStartup' "$app" "$project"; then
-  ok "launch-at-login framework/state removed from the keyboard process"
+if grep -q 'agentServiceWithPlistName:kAgentPlist' "$app" && \
+   grep -q 'registerAndReturnError' "$app" && \
+   grep -q 'unregisterAndReturnError' "$app" && \
+   grep -q 'ServiceManagement/ServiceManagement.h' "$app"; then
+  ok "background agent uses SMAppService registration"
 else
-  bad "login-item machinery remains in the ultra-light runtime"
+  bad "background-agent lifecycle is not owned by SMAppService"
+fi
+
+if grep -q '<key>BundleProgram</key>' "$agent_plist" && \
+   grep -q '<string>Contents/Resources/SangKeyAgent</string>' "$agent_plist" && \
+   grep -q '<key>KeepAlive</key>' "$agent_plist" && \
+   grep -q '<string>Aqua</string>' "$agent_plist" && \
+   grep -q 'Library/LaunchAgents/com.sangtrx.sangkey.agent.plist' "$project"; then
+  ok "LaunchAgent is bundled inside the app and points at embedded agent"
+else
+  bad "bundled LaunchAgent layout is inconsistent"
+fi
+
+manual_launchctl=$(grep -R -nE '(^|[^A-Za-z])launchctl([[:space:]]|$)' \
+    "$app" "$agent" "$package" "$project" || true)
+manual_user_launchagents=$(grep -R -nE '(~|\$HOME|\$\{HOME\})/Library/LaunchAgents|/Users/[^/]+/Library/LaunchAgents' \
+    "$app" "$agent" "$package" "$project" || true)
+manual_system_launchagents=$(grep -R -nE '(^|[[:space:]="/])/Library/LaunchAgents' \
+    "$app" "$agent" "$package" "$project" || true)
+if [ -z "$manual_launchctl" ] && [ -z "$manual_user_launchagents" ] && [ -z "$manual_system_launchagents" ]; then
+  ok "runtime/install path does not mutate user/system LaunchAgents or shell out to launchctl"
+else
+  printf '%s\n%s\n%s\n' "$manual_launchctl" "$manual_user_launchagents" "$manual_system_launchagents" | sed '/^$/d'
+  bad "manual launchctl or user/system LaunchAgents mutation was introduced"
+fi
+
+if grep -q 'SangKeyPreferencesDomain = @"com.sangtrx.sangkey"' "$prefs" && \
+   grep -q 'CFPreferencesCopyValue' "$prefs" && \
+   grep -q 'CFPreferencesSetValue' "$prefs" && \
+   grep -q 'CFNotificationCenterGetDarwinNotifyCenter' "$prefs" && \
+   grep -q 'SangKeyCurrentEngineOptions' "$agent"; then
+  ok "launcher and agent share an explicit preferences domain via Darwin notification"
+else
+  bad "split-process preference propagation is incomplete"
+fi
+
+if grep -q '@"agentDesiredEnabled": @1' "$prefs" && \
+   grep -q 'if (!SangKeyPreferenceBool(kAgentDesiredEnabled)) return;' "$app" && \
+   grep -q 'SangKeySetPreferenceBool(kAgentDesiredEnabled, YES)' "$app" && \
+   grep -q 'SangKeySetPreferenceBool(kAgentDesiredEnabled, NO)' "$app"; then
+  ok "explicit user disable intent survives reopening the control app"
+else
+  bad "control app can silently undo the user's background-agent choice"
+fi
+
+if grep -q 'SANGKEY_AGENT_CI_SMOKE' "$agent" && \
+   grep -q 'dictionaries=yes; AppKit=no' "$agent" && \
+   grep -q 'RSS_KIB.*30720\|30720' "$ci"; then
+  ok "CI has a deterministic no-TCC agent smoke and 30 MiB RSS budget"
+else
+  bad "headless runtime footprint is not continuously gated"
+fi
+
+if grep -q 'SangKeyAgent' "$package" && \
+   grep -q 'codesign --force --identifier "\$AGENT_IDENTIFIER" --options runtime' "$package" && \
+   grep -q 'codesign --verify --deep --strict.*"\$APP"' "$package"; then
+  ok "nested agent is signed before the enclosing app and deep-verified"
+else
+  bad "nested-code signing order/verification is incomplete"
+fi
+
+if grep -q 'AGENT_IDENTIFIER="com.sangtrx.sangkey.agent"' "$package" && \
+   grep -q 'ACTUAL_AGENT_IDENTIFIER' "$package" && \
+   grep -q "codesign -d --verbose=4.*AGENT" "$ci" && \
+   grep -q "codesign -d --verbose=4.*AGENT" "$release"; then
+  ok "agent designated requirement/TCC code identifier is explicit and read-back verified"
+else
+  bad "agent code-signing identifier can drift from com.sangtrx.sangkey.agent"
+fi
+
+if grep -q 'lipo "\$AGENT" -verify_arch arm64 x86_64' "$ci" && \
+   grep -q 'lipo "\$AGENT" -verify_arch arm64 x86_64' "$release" && \
+   grep -q "SANGKEY_ARCHS: 'arm64 x86_64'" "$ci" && \
+   grep -q "SANGKEY_ARCHS: 'arm64 x86_64'" "$release"; then
+  ok "CI and release require a universal headless agent"
+else
+  bad "agent architecture is not universally verified"
+fi
+
+if grep -q "otool -L \"\$AGENT\"" "$ci" && \
+   grep -qE "grep -Eqi 'AppKit\|SwiftUI\|Combine\|/libswift\|ServiceManagement'" "$ci" && \
+   grep -qE "grep -Eqi 'AppKit\|SwiftUI\|Combine\|/libswift\|ServiceManagement'" "$release"; then
+  ok "dynamic linkage gates forbid UI/Swift/login frameworks in the agent"
+else
+  bad "agent linkage invariants are not enforced dynamically"
 fi
 
 mutable_uses=$(grep -R -nE '^[[:space:]]*-[[:space:]]+uses:[[:space:]]+[^@]+@[^#[:space:]]+' .github/workflows \
   | grep -vE '@[0-9a-f]{40}([[:space:]]|$)' || true)
-if [ -z "$mutable_uses" ]; then ok "GitHub Actions are immutable-SHA pinned"; else echo "$mutable_uses"; bad "mutable GitHub Action ref"; fi
+if [ -z "$mutable_uses" ]; then
+  ok "GitHub Actions are immutable-SHA pinned"
+else
+  echo "$mutable_uses"
+  bad "mutable GitHub Action ref"
+fi
 
 EXPECTED_XCODEGEN_SHA=4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
-if grep -q "$EXPECTED_XCODEGEN_SHA" .github/workflows/ci.yml && grep -q "$EXPECTED_XCODEGEN_SHA" "$release"; then
+if grep -q "$EXPECTED_XCODEGEN_SHA" "$ci" && grep -q "$EXPECTED_XCODEGEN_SHA" "$release"; then
   ok "XcodeGen is checksum pinned"
 else
   bad "XcodeGen dependency is not deterministic"
@@ -115,32 +225,10 @@ else
   bad "release provenance gate is incomplete"
 fi
 
-if grep -q 'isRunning.*hasAccessibilityPermission\|isRunning]' "$app" && \
-   grep -q 'tryStartInput' "$app"; then
-  ok "event tap itself is the effective runtime-permission signal"
-else
-  bad "Accessibility lifecycle no longer follows the event tap"
-fi
-
-if grep -q 'github.com/sangtrx/SangKey/releases/latest' "$app" && \
-   grep -q 'derived from 84Key/OpenKey' platform/macos/Resources/Info.plist; then
-  ok "SangKey brand and upstream provenance are both explicit"
-else
-  bad "brand/provenance metadata is inconsistent"
-fi
-
-if grep -q "SANGKEY_ARCHS: 'arm64 x86_64'" .github/workflows/ci.yml && \
-   grep -q "SANGKEY_ARCHS: 'arm64 x86_64'" "$release" && \
-   grep -q 'lipo .* -verify_arch arm64 x86_64' .github/workflows/ci.yml && \
-   grep -q 'lipo .* -verify_arch arm64 x86_64' "$release"; then
-  ok "CI and release require universal arm64+x86_64 binaries"
-else
-  bad "release architecture is not universal and verified"
-fi
-
 UPLOAD_V6=b7c566a772e6b6bfb58ed0dc250532a479d7789f
 DOWNLOAD_V7=37930b1c2abaa49bbe596cd826c3c89aef350131
-if grep -q "actions/upload-artifact@$UPLOAD_V6" "$release" && grep -q "actions/download-artifact@$DOWNLOAD_V7" "$release"; then
+if grep -q "actions/upload-artifact@$UPLOAD_V6" "$release" && \
+   grep -q "actions/download-artifact@$DOWNLOAD_V7" "$release"; then
   ok "artifact handoff uses reviewed Node 24 action pins"
 else
   bad "artifact handoff action pins changed"
@@ -152,7 +240,7 @@ else
   bad "CHR() can read outside the typing buffer"
 fi
 
-if grep -q '/usr/bin/base64 -D' "$release" && grep -q 'Smoke-test release credential decoder' .github/workflows/ci.yml; then
+if grep -q '/usr/bin/base64 -D' "$release" && grep -q 'Smoke-test release credential decoder' "$ci"; then
   ok "macOS-native release credential decoder is smoke tested"
 else
   bad "release credential decoder is not portability tested"
@@ -170,11 +258,12 @@ else
 fi
 
 if grep -q 'name: SangKey' "$project" && \
-   grep -q 'MARKETING_VERSION: "0.3.0"' "$project" && \
-   grep -q 'APP_NAME="SangKey"' tools/package.sh; then
-  ok "product/build identity is consistently SangKey 0.3.0"
+   grep -q 'MARKETING_VERSION: "0.4.0"' "$project" && \
+   grep -q 'CURRENT_PROJECT_VERSION: "14"' "$project" && \
+   grep -q 'APP_NAME="SangKey"' "$package"; then
+  ok "product/build identity is consistently SangKey 0.4.0 build 14"
 else
-  bad "product identity is mixed between 84Key and SangKey"
+  bad "product identity/version is inconsistent"
 fi
 
 echo

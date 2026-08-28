@@ -1,69 +1,158 @@
-# 84Key Architecture
+# SangKey Architecture
 
-84Key is split into a portable engine and a platform shell so the same Vietnamese
-typing logic can be reused on macOS today and Windows/Linux later.
+SangKey separates the always-on typing runtime from the user interface. The goal
+is to keep the process holding Accessibility/event-tap capability small while
+preserving the proven OpenKey-derived C++ engine.
 
 ## Layout
 
-```
+```text
 core/
-  engine/   C++ typing engine (from OpenKey, GPLv3) — platform-independent
-  data/     english_words.dat, viet_telex.dat (generated)
-  tests/    C++ test harness (engine + English detection)
+  engine/       C++14 typing engine (OpenKey-derived, GPLv3)
+  data/         english_words.dat, viet_telex.dat
+  tests/        engine, simulation, parser/sanitizer and invariant gates
+
 platform/macos/
-  App/      SwiftUI: Key84App (menu-bar entry), AppDelegate, AppController
-            (owns the input controller + permission/login lifecycle),
-            SettingsView, AppSettings, OnboardingView, LoginItemManager
-  Input/    Obj-C++: InputController (CGEvent tap, key send, Spotlight AX),
-            EngineGlobals.cpp (engine option globals)
-  Bridge/   Key84-Bridging-Header.h (exposes InputController to Swift)
-  project.yml  XcodeGen spec -> 84Key.xcodeproj
-tools/      gen_dict.py (dictionary generator)
+  Agent/        SangKeyAgent.mm + bundled LaunchAgent plist
+  App/          ephemeral AppKit/ServiceManagement control menu
+  Input/        InputController.mm + EngineGlobals.cpp
+  HeadlessCompat/
+                narrow replacements for NSWorkspace,
+                NSRunningApplication and NSEvent conveniences inherited by
+                InputController when it is compiled into the headless agent
+  Shared/       explicit CFPreferences domain + Darwin notification contract
+  Resources/    Info.plist and app icon assets
+  tests/        macOS distribution/security source invariants
+  project.yml   XcodeGen spec -> SangKey.xcodeproj
+
+tools/          dictionary generation, packaging and manual e2e helpers
 ```
 
-## The engine (`core/engine`)
+## Process boundary
 
-A pure C++14 library. The entry point is `vKeyHandleEvent(event, state, keycode,
-capsStatus, otherControlKey)`. It maintains the current word buffer and writes its
-decision into a `vKeyHookState`: a `code` (do-nothing / will-process / restore /
-replace-macro), a `backspaceCount`, and `charData[]` (the replacement characters,
-stored right-to-left). The host turns this into output. Options are `extern int v…`
-globals the host defines (see `EngineGlobals.cpp`).
+```text
+SangKey.app                         SangKeyAgent
+(ephemeral)                         (always-on)
+
+AppKit                              Foundation
+ServiceManagement                   ApplicationServices
+menu/status UI                      Carbon
+                                    Security
+        │                           CGEventTap
+        │ CFPreferences             C++ engine + dictionaries
+        ├──────────────────────────►
+        │ Darwin notification
+        └──────────────────────────► reload options
+```
+
+`SangKey.app` does not contain `InputController` or the C++ typing engine. It
+registers/unregisters the bundled LaunchAgent with `SMAppService`, edits shared
+preferences and opens relevant System Settings pages. The control process may be
+closed without stopping Vietnamese input.
+
+`SangKeyAgent` owns the event tap, Accessibility compatibility paths, engine and
+dictionaries. It deliberately does not link AppKit, ServiceManagement, Swift,
+SwiftUI or Combine. CI audits the final Mach-O rather than relying only on source
+layout.
+
+## Background registration
+
+The shipping application contains:
+
+```text
+SangKey.app/
+  Contents/
+    Resources/
+      SangKeyAgent
+      english_words.dat
+      viet_telex.dat
+    Library/
+      LaunchAgents/
+        com.sangtrx.sangkey.agent.plist
+```
+
+The plist uses `BundleProgram = Contents/Resources/SangKeyAgent` and is registered
+through `SMAppService.agentServiceWithPlistName:`. SangKey does not install files
+into `~/Library/LaunchAgents` and does not invoke `launchctl`.
+
+The control app persists an `agentDesiredEnabled` preference so explicitly
+disabling the background agent remains disabled when the control app is opened
+again.
+
+## Code identity
+
+There are three intentional identities:
+
+- release control app: `com.sangtrx.sangkey`
+- debug control app: `com.sangtrx.sangkey.debug`
+- input agent: `com.sangtrx.sangkey.agent`
+
+`SangKeyAgent` is a command-line Mach-O, not an application bundle. Packaging
+therefore passes its identifier explicitly to `codesign` and reads the identifier
+back before signing the enclosing app. This gives the Accessibility-capable
+helper a deterministic designated requirement across releases.
+
+## Engine (`core/engine`)
+
+The engine is pure C++14. Its main entry point is
+`vKeyHandleEvent(event, state, keycode, capsStatus, otherControlKey)`. It keeps
+the current word buffer and returns a `vKeyHookState` containing a decision code,
+backspace count and replacement characters. Platform code converts that decision
+into macOS events.
+
+The legacy engine bytes retained in `EngineUpstream.inc` are treated as pinned
+provenance and guarded by regression tests. SangKey-specific behavior is layered
+around them rather than casually rewriting the mature typing core.
 
 ## macOS input core (`platform/macos/Input/InputController.mm`)
 
-An Obj-C++ class that installs a session-level `CGEventTap`. On each key it calls
-`vKeyHandleEvent`, then:
+`InputController` installs a session-level `CGEventTap`. On key events it calls
+the C++ engine and either lets the original event through or emits the required
+backspaces/replacement characters. The same file also owns compatibility paths
+for Spotlight/system search and browser/content-editable behavior.
 
-- **do-nothing** → lets the key through;
-- **will-process / restore** → posts `backspaceCount` synthetic backspaces and the
-  new characters (decoded from `charData`);
-- **replace-macro** → expands a macro.
+The implementation came from an AppKit-based lineage. To avoid a high-risk
+rewrite of this correctness-sensitive file, the headless target puts
+`HeadlessCompat` first in its header search path. Only three inherited AppKit
+conveniences are substituted:
 
-The interface (`InputController.h`) is pure Obj-C so Swift can use it through the
-bridging header; the implementation is Obj-C++ and talks to the C++ engine.
+- frontmost application lookup;
+- process signing/bundle identifier lookup;
+- `charactersIgnoringModifiers` keyboard-layout translation.
+
+The adapter uses Carbon/TIS and Security APIs and caches the current frontmost
+process/signing identifier so expensive signing lookup is not repeated on every
+keystroke. The event/engine transformation code remains shared with the proven
+implementation.
 
 ## English auto-detection
 
-Two dictionaries keyed by raw Telex keystrokes — a common-English list and a
-Vietnamese-by-Telex syllable list — are consulted only at a transform keystroke
-(off the hot path). If the typed keys form an English word that is not a valid
-Vietnamese syllable, the diacritic is suppressed; ambiguous prefixes (e.g.
-`google`) are restored at the word break. See `core/engine/EnglishDetect.*` and
-`tools/gen_dict.py` (the Vietnamese list is generated from linguistic rules, not a
-scraped word list).
+Two dictionaries are keyed by raw Telex keystrokes: a common-English list and a
+Vietnamese-by-Telex syllable list. They are loaded by `SangKeyAgent` from the
+application Resources directory. The engine consults them around transformation
+boundaries to suppress unwanted Vietnamese marks in English words while retaining
+valid Vietnamese spellings.
+
+Measurements showed that both dictionaries add only a small fraction of the old
+AppKit process's idle RSS, so v0.4 keeps the existing representation instead of
+rewriting a correctness-sensitive lookup path for a minor memory gain.
 
 ## Spotlight fix
 
-Spotlight's search field applies injected events asynchronously, so a fast
-backspace can be lost (`chúng`→`chuúng`). For Spotlight only, `InputController`
-replaces the text atomically through the Accessibility API (read value + caret,
-verify the base letters match, set the new value), with a short stale-read retry,
-and falls back to the normal CGEvent path on any failure — so every other app is
-unaffected.
+Some system search fields can apply injected events asynchronously and lose a
+backspace. For supported targets, `InputController` uses Accessibility to inspect
+the focused search field and can replace the affected text atomically. Failure
+falls back to the normal/select-and-overwrite event path rather than changing
+behavior globally.
 
-## Options & persistence
+## Options and persistence
 
-`AppSettings` is the single source of truth, backed by `NSUserDefaults` with
-**registered defaults** (so default-ON options survive an absent key). Changes are
-persisted and pushed into the engine globals via `InputController.applyEngineOptions:`.
+The explicit preference domain is `com.sangtrx.sangkey`.
+`SangKeyPreferences.*` reads/writes values with `CFPreferences`, and changes are
+announced with the Darwin notification
+`com.sangtrx.sangkey.preferences-changed`. The agent reloads its engine globals
+from that domain; the control app reads the same domain for menu state.
+
+A VI/EN hotkey change originating inside the agent is also written back to the
+shared preferences so the next control-panel launch reflects the actual mode.
+There is no XPC service or database between the two processes.

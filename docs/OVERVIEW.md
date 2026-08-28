@@ -1,119 +1,150 @@
-# 84Key — Product & Feature Overview
+# SangKey — Product & Feature Overview
 
-> A plain-language reference describing **what 84Key is** and **what it does**, for
-> onboarding, support, marketing copy, or feeding to an assistant as context.
-> For internals see [`ARCHITECTURE.md`](ARCHITECTURE.md); for how it's built and
-> tested see [`BUILD.md`](BUILD.md) and [`TESTING.md`](TESTING.md).
+> Plain-language reference for what SangKey is and how the current macOS product behaves.
+> For internals see [`ARCHITECTURE.md`](ARCHITECTURE.md); for build/test details see
+> [`BUILD.md`](BUILD.md) and [`TESTING.md`](TESTING.md).
 
 ## What it is
 
-84Key is a free, open-source **Vietnamese input method (bộ gõ tiếng Việt) for
-macOS**. It lets you type Vietnamese with diacritics using standard input
-conventions (Telex, VNI, Simple Telex) in any application. The name comes from
-Vietnam's `+84` international calling code.
+SangKey is a free, open-source **Vietnamese input method for macOS**. It types
+Vietnamese with Telex, VNI and Simple Telex across normal macOS applications
+while keeping the always-running input process unusually small.
 
-It reuses the proven [OpenKey](https://github.com/tuyenvm/OpenKey) C++ typing
-engine (GPLv3) and wraps it in a modern SwiftUI **menu-bar app**, adding two
-flagship improvements on top: **automatic English-word detection** and a
-**Spotlight diacritic-placement fix**.
+The typing engine descends from the GPLv3 OpenKey/84Key lineage. SangKey keeps
+that mature C++ core and focuses its macOS-specific work on compatibility,
+privacy, security and runtime footprint.
 
-- **Platform:** macOS only today. Windows and Linux are planned; the typing
-  engine is already platform-independent C++ to make that possible.
-- **License:** GPLv3 (inherited from OpenKey).
-- **Bundle id:** `com.nghialuong.key84`.
-- **Privacy:** 100% local. No telemetry, no network calls for typing, no
-  accounts. Keystroke processing happens entirely on-device.
+- **Platform:** macOS 14+.
+- **License:** GNU GPLv3.
+- **Release control-app bundle id:** `com.sangtrx.sangkey`.
+- **Input-agent code identifier:** `com.sangtrx.sangkey.agent`.
+- **Privacy:** typing conversion is local; the input agent has no telemetry,
+  account, cloud-sync or background-network path.
+- **Distribution:** universal `arm64 + x86_64`, Developer ID signed and Apple
+  notarized when built by the release workflow.
 
-## How it works (one paragraph)
+## How it works
 
-84Key installs a session-level `CGEvent` tap (requiring the macOS
-**Accessibility** permission). For each keystroke it asks the C++ engine what to
-do; the engine maintains the current word and decides whether to leave the key
-alone or to rewrite the word (e.g. send synthetic backspaces, then the
-re-composed characters with the correct diacritics). It deliberately avoids
-acting in secure-input / password fields.
+The product contains two processes with different jobs.
 
-## Flagship features
+**`SangKeyAgent`** is the background input process. It owns the session-level
+`CGEventTap`, C++ engine, dictionaries and the Accessibility-based compatibility
+paths. It does not link AppKit, ServiceManagement or Swift runtime machinery.
 
-1. **Accurate Vietnamese typing** — Telex, VNI, and Simple Telex, backed by the
-   battle-tested OpenKey engine, with spell-checking of Vietnamese syllables.
-2. **Automatic English detection** — while you type an English word in Telex,
-   84Key recognizes it and skips diacritic transformation, so words like "feed",
-   "tools", or "google" come out correctly **without switching modes**. It uses
-   two dictionaries (a common-English list and a rule-generated
-   Vietnamese-by-Telex syllable list) consulted off the hot path; ambiguous
-   prefixes are resolved at the word break. *On by default.*
-3. **Spotlight fix** — Spotlight's search field applies injected events
-   asynchronously, which can drop a fast backspace (`chúng` → `chuúng`). For
-   Spotlight only, 84Key rewrites the text atomically via the Accessibility API
-   (and falls back to the normal path on any failure, so other apps are
-   unaffected). *On by default.*
-4. **Menu-bar app** — lightweight SwiftUI app living in the menu bar; the menu
-   shows the current language (**VI/EN**) and lets you toggle it, open Settings,
-   and quit. Includes a guided Accessibility onboarding flow.
+**`SangKey.app`** is a small control surface. Open it when you want to change the
+input mode/options, enable or disable the background agent, open System Settings,
+or check for a new release. Closing this control app does **not** stop typing.
 
-## Settings reference
+Settings are shared through an explicit local CFPreferences domain and a Darwin
+notification. No XPC service or database is required.
 
-These are the user-facing options in **Settings**, grouped as they appear in the
-app. Defaults reflect the registered defaults in `AppSettings.swift`.
+## Main features
 
-### Input
-- **Input method** — Telex (default), VNI, Simple Telex 1, Simple Telex 2.
-- **Code table** — Unicode (default), TCVN3 (ABC), VNI Windows, Unicode
-  Compound, Vietnamese CP1258.
+1. **Accurate Vietnamese typing** — Telex, VNI and Simple Telex backed by the
+   OpenKey-derived C++ engine.
+2. **Automatic English detection** — common English words can pass through Telex
+   without accidental Vietnamese transforms. English and Vietnamese-by-Telex
+   dictionaries are loaded locally by the background agent.
+3. **Spotlight/system-search compatibility** — for search fields that can lose
+   injected backspaces, SangKey can use the Accessibility API to perform a local
+   atomic text replacement, with safe fallbacks.
+4. **Browser / Google Docs compatibility** — the event sender includes targeted
+   handling for asynchronous browser/content-editable behavior rather than
+   slowing every application globally.
+5. **Very small always-on runtime** — AppKit and ServiceManagement live only in
+   the control process. CI measures the actual headless agent with production
+   dictionaries loaded and enforces a 30 MiB idle-RSS ceiling.
+6. **Independent control and typing lifecycle** — the user can close the control
+   panel while the registered LaunchAgent keeps running, or explicitly disable
+   the background input agent and have that choice persist.
 
-### Smart features
-- **Automatic English detection** *(default ON)* — skip diacritics while typing
-  an English word in Telex, without switching modes.
-- **Fix diacritics in Spotlight** *(default ON)* — the Spotlight fix above.
-- **Smart switch key (remember language per app)** *(default ON)* — remembers
-  VI/EN choice per application.
+## User controls
 
-### Vietnamese typing
-- **Spell check** *(default ON)* — validate Vietnamese syllables.
-- **Modern orthography (oà, uý)** *(default ON)* — reform spelling vs.
-  traditional `òa`/`úy`.
-- **Free mark placement** — allow tone marks in flexible positions.
-- **Quick Telex (cc→ch, gg→gi…)** — consonant shortcuts.
-- **Restore word if spelling is wrong** — revert to raw keys on an invalid
-  syllable.
-- **Quick start consonant (f→ph, j→gi, w→qu)**.
-- **Quick end consonant (g→ng, h→nh, k→ch)**.
-- **Allow Z / F / W / J as letters**.
-- **Capitalize first letter**.
+The current control menu exposes the deliberately small set of options supported
+by the v0.4 product surface:
+
+### Language and input
+
+- **Vietnamese / English** mode.
+- **Input method:** Telex (default), VNI, Simple Telex 1, Simple Telex 2.
+- Default VI/EN switch hotkey: **⌃⌘Space**.
+
+### Smart typing
+
+- **Automatic English detection** — default ON.
+- **Vietnamese spelling check** — default ON.
+- **Modern orthography** — default ON.
 
 ### Compatibility
-- **Use macros (text expansion)**.
-- **Fix browser address-bar autocomplete** *(default OFF — avoids stray
-  characters in normal fields)*.
-- **Turn off Vietnamese in non-English keyboard layouts**.
+
+- **Spotlight/system search fix** — default ON.
+- **Browser / Google Docs fix** — default ON.
 
 ### System
-- **Launch 84Key at login** — via macOS `SMAppService`.
-- **Switch language** — click the menu-bar **VI/EN** item.
 
-## Permissions & setup
+- See whether the background agent is enabled, disabled or awaiting macOS approval.
+- Enable or disable the background agent.
+- Open **Privacy & Security → Accessibility**.
+- Open **General → Login Items** for background-item approval.
+- Open the SangKey GitHub Releases page to check for updates.
+- Close the control panel while leaving the input agent running.
 
-1. Launch 84Key; it appears in the menu bar.
-2. Grant **Accessibility** permission when prompted (System Settings → Privacy &
-   Security → Accessibility). The onboarding flow guides this. 84Key detects the
-   grant by actually starting the event tap (more reliable than
-   `AXIsProcessTrusted()` for ad-hoc/dev builds), and may quit-and-relaunch to
-   pick up a fresh grant.
-3. **Disable other Vietnamese IMEs** (OpenKey, EVKey, the built-in macOS
-   Vietnamese source) — running more than one causes conflicting keystrokes.
+The underlying engine still contains additional compatibility/options inherited
+from its lineage, but SangKey does not advertise a control as user-facing unless
+the current control app actually exposes it.
 
-## What 84Key does *not* do
+## Permissions and setup
 
-- No telemetry, analytics, or network calls for typing.
-- No accounts or cloud sync.
-- Does not act in secure-input/password fields by design.
-- Not yet notarized for distribution (planned; requires an Apple Developer
-  account). Local/dev builds run after approval in System Settings.
+1. Copy `SangKey.app` to `/Applications`.
+2. Launch it once. The app registers its bundled user-session LaunchAgent through
+   Apple's `SMAppService` API when background typing is desired.
+3. If macOS marks the background item as requiring approval, open **Login Items**
+   from SangKey and approve it.
+4. Grant **Accessibility** to the SangKey input agent under **Privacy & Security →
+   Accessibility**. The agent needs this powerful permission to observe and post
+   keyboard events system-wide.
+5. Disable other event-based Vietnamese IMEs to avoid multiple event taps
+   transforming the same keystrokes.
+6. Close the SangKey control panel if you do not need it; input continues in the
+   background agent.
+
+For secure/password input, SangKey relies on macOS **Secure Event Input** as the
+platform boundary. It does not claim a custom password-field detector.
+
+## Background lifecycle
+
+The helper is shipped inside the application bundle together with its LaunchAgent
+plist. SangKey does not write into the user's `~/Library/LaunchAgents` directory
+and does not invoke `launchctl` itself.
+
+Choosing **Tắt bộ gõ nền** records an explicit disabled preference and unregisters
+the service. Reopening the control app respects that choice instead of silently
+turning the helper back on.
+
+## Updates
+
+There is no background update checker or embedded installer. **Kiểm tra cập nhật…**
+opens the public SangKey GitHub Releases page in the default browser. Release
+payloads are expected to include a notarized DMG and `SHA256SUMS`.
+
+## What SangKey does not do
+
+- No telemetry or analytics.
+- No account or cloud sync.
+- No background HTTP client in the input agent.
+- No clipboard or Keychain client in the input agent.
+- No XPC service or database between launcher and agent.
+- No Swift/SwiftUI/Combine in the v0.4 macOS runtime.
+- No persistent AppKit settings/window graph inside the Accessibility-enabled
+  always-on process.
+- No manual `launchctl` installation flow.
 
 ## Credits
 
-- **[OpenKey](https://github.com/tuyenvm/OpenKey)** by Mai Vũ Tuyên — the GPLv3
-  Vietnamese typing engine powering 84Key.
-- **[google-10000-english](https://github.com/first20hours/google-10000-english)**
-  — the English word list used for automatic English detection.
+SangKey is independently branded while preserving upstream attribution to:
+
+- [`nghialuong/84Key`](https://github.com/nghialuong/84Key)
+- [`tuyenvm/OpenKey`](https://github.com/tuyenvm/OpenKey)
+- [`google-10000-english`](https://github.com/first20hours/google-10000-english)
+
+See [`NOTICE`](../NOTICE) and the source headers for lineage details.

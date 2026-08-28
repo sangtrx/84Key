@@ -2,14 +2,19 @@
 
 **Ultra-light, Mac-only Vietnamese input for macOS.**
 
-SangKey is a native menu-bar Vietnamese input method designed around the smallest
-practical long-running footprint on macOS:
+SangKey is a native Vietnamese input method designed so the process that handles
+keystrokes 24/7 stays as small as practical:
 
-- **Zero Swift / SwiftUI / Combine.** The macOS host is Objective-C++ + AppKit.
+- **Headless `SangKeyAgent`.** The always-on input process does not link AppKit,
+  ServiceManagement, Swift, SwiftUI or Combine.
+- **Ephemeral control app.** `SangKey.app` uses AppKit + ServiceManagement only
+  while you are changing settings or managing the background agent; you can close
+  it and typing continues.
 - **C++14 typing engine** with Telex, VNI and Simple Telex.
 - **Objective-C++ `CGEventTap`** for low-latency system-wide input.
-- **One `NSStatusItem` + `NSMenu` at idle.** There is no persistent Settings window.
-- **No daemon, XPC helper, ServiceManagement helper, telemetry or background network client.**
+- **No XPC service, daemon, telemetry or background network client.** The helper
+  is a user-session LaunchAgent bundled inside the app and registered with Apple's
+  `SMAppService` API.
 - **No embedded auto-updater.** Update checks only open GitHub Releases in the browser.
 - **Universal release** (`arm64` + `x86_64`) for macOS 14+.
 - **Hardened release chain** with exact-main provenance, ASan/UBSan gates,
@@ -18,49 +23,67 @@ practical long-running footprint on macOS:
 ## Architecture
 
 ```text
-AppKit NSStatusItem + NSMenu
-           │
-           ▼
-Objective-C++ SangKey host + InputController
+SangKey.app — opened only when needed
+AppKit control menu + ServiceManagement
+              │
+              │ CFPreferences + Darwin notification
+              ▼
+SangKeyAgent — always running
+Foundation + ApplicationServices + Carbon + Security
 CGEventTap + Accessibility compatibility paths
-           │
-           ▼
+              │
+              ▼
 OpenKey-derived C++ engine
 Telex / VNI / English detection
 ```
 
-CI inspects the final Mach-O with `otool -L`; linking Swift, SwiftUI, Combine or
-ServiceManagement is a build failure.
+The control app and input agent share an explicit preferences domain. There is no
+XPC protocol or database between them. CI inspects both final Mach-O binaries;
+the always-on agent fails the build if it links AppKit, ServiceManagement,
+SwiftUI, Combine or the Swift runtime.
+
+## Footprint
+
+The v0.4 CI gate runs the **actual embedded SangKeyAgent** with both English and
+Vietnamese dictionaries loaded, while skipping only the TCC-dependent event tap.
+Its idle RSS must stay below **30 MiB**. The architecture was selected after
+measurement showed the previous AppKit-resident process dominated idle memory;
+rewriting the dictionaries would have saved very little by comparison.
 
 ## Privacy
 
 All typing conversion happens locally. SangKey has no account system, analytics,
 telemetry SDK, clipboard client, keychain client, background updater or in-process
-HTTP client.
+HTTP client in the input agent.
 
-SangKey needs **System Settings → Privacy & Security → Accessibility** because a
-system-wide event-tap input method must observe and synthesize keyboard events.
-For password/secure-input contexts, macOS Secure Event Input is the platform
-boundary; SangKey does not claim a custom password-field detector.
+`SangKeyAgent` needs **System Settings → Privacy & Security → Accessibility**
+because a system-wide event-tap input method must observe and synthesize keyboard
+events. For password/secure-input contexts, macOS Secure Event Input is the
+platform boundary; SangKey does not claim a custom password-field detector.
+
+The control app itself does not process keystrokes. It can open the Accessibility
+and Login Items settings pages so you can approve the agent when macOS requires it.
 
 See [`SECURITY.md`](SECURITY.md) for the full threat model.
 
 ## Controls
 
-Everything is intentionally kept in the menu-bar menu rather than a resident
-settings UI:
+Launch **SangKey.app** when you want to change settings. Its transient menu lets
+you:
 
-- Vietnamese / English mode.
-- Telex, VNI, Simple Telex 1/2.
-- Automatic English detection.
-- Vietnamese spelling + modern orthography.
-- Spotlight and browser/Google Docs compatibility paths.
-- Accessibility settings, manual update check, quit.
+- enable/disable the background input agent;
+- select Vietnamese / English mode;
+- select Telex, VNI, Simple Telex 1/2;
+- toggle automatic English detection;
+- toggle Vietnamese spelling + modern orthography;
+- toggle Spotlight and browser/Google Docs compatibility paths;
+- open Accessibility or Login Items settings;
+- open the GitHub Releases page for a manual update check.
 
-The VI/EN hotkey defaults to **⌃⌘Space**. SangKey deliberately does not manage
-Launch at Login itself; if desired, add SangKey using macOS **System Settings →
-General → Login Items**. This keeps ServiceManagement and login-state machinery
-out of the always-running keyboard process.
+The VI/EN hotkey defaults to **⌃⌘Space**. Choosing **Đóng bảng điều khiển** exits
+the AppKit control process; the registered `SangKeyAgent` continues running.
+Choosing **Tắt bộ gõ nền** persists that choice, so reopening the control app does
+not silently re-enable it.
 
 ## Install
 
@@ -80,7 +103,15 @@ shasum -a 256 -c SHA256SUMS
 xcrun stapler validate SangKey-vX.Y.Z.dmg
 ```
 
-Then drag **SangKey** into `/Applications`, launch it, and grant Accessibility.
+Then:
+
+1. Drag **SangKey** into `/Applications`.
+2. Launch `SangKey.app` once so it can register the bundled background agent.
+3. If macOS asks for background-item approval, use **Mở Login Items…** and approve it.
+4. Grant **Accessibility** to the SangKey input agent when macOS prompts / shows it
+   in Privacy & Security → Accessibility.
+5. Close the control panel when finished; the headless agent keeps typing.
+
 Avoid running another event-based Vietnamese input utility at the same time.
 
 ## Build
@@ -97,7 +128,7 @@ Run the engine/sanitizer/security suite:
 bash core/tests/run_tests.sh
 ```
 
-Build the app:
+Build the app + agent:
 
 ```sh
 cd platform/macos
@@ -127,10 +158,13 @@ SANGKEY_ARCHS="arm64 x86_64" bash tools/package.sh
 - `core/engine/` — OpenKey-derived C++ typing engine.
 - `core/data/` — English/Vietnamese detection dictionaries.
 - `core/tests/` — engine, typing simulation, ASan/UBSan and parser tests.
-- `platform/macos/App/SangKeyApp.mm` — complete AppKit menu-bar host.
+- `platform/macos/Agent/` — always-on headless `SangKeyAgent` + bundled LaunchAgent descriptor.
+- `platform/macos/App/SangKeyApp.mm` — ephemeral AppKit/ServiceManagement control menu.
+- `platform/macos/HeadlessCompat/` — narrow adapters for three AppKit conveniences inherited by the input bridge.
+- `platform/macos/Shared/` — explicit shared preferences + Darwin notification contract.
 - `platform/macos/Input/` — Objective-C++ event-tap/input bridge.
 - `platform/macos/tests/` — distribution/security/runtime invariants.
-- `tools/package.sh` — local/release packaging and notarization.
+- `tools/package.sh` — nested-code signing, local/release packaging and notarization.
 - `.github/workflows/` — CI and split-privilege release pipeline.
 
 ## Lineage and license

@@ -23,7 +23,7 @@ jobs:
         run: bash core/tests/run_tests.sh
 
   macos-app:
-    name: Build macOS app
+    name: Build macOS app + headless agent
     runs-on: macos-26
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -64,7 +64,7 @@ jobs:
         working-directory: platform/macos
         run: xcodegen generate
 
-      - name: Build zero-Swift AppKit host without code signing
+      - name: Build launcher and headless agent without code signing
         working-directory: platform/macos
         run: |
           set -euo pipefail
@@ -75,47 +75,66 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Verify ultra-light runtime linkage and idle footprint
+      - name: Verify split linkage and always-on agent footprint
         run: |
           set -euo pipefail
           APP=$(find "$HOME/Library/Developer/Xcode/DerivedData" -path '*/Build/Products/Debug/SangKey (DEV).app' -print -quit)
           test -n "$APP"
-          ENTRY="$APP/Contents/MacOS/SangKey (DEV)"
-          REAL="$APP/Contents/MacOS/SangKey (DEV).debug.dylib"
-          test -x "$ENTRY"
-          test -f "$REAL"
+          LAUNCHER_ENTRY="$APP/Contents/MacOS/SangKey (DEV)"
+          LAUNCHER_REAL="$APP/Contents/MacOS/SangKey (DEV).debug.dylib"
+          AGENT="$APP/Contents/Resources/SangKeyAgent"
+          AGENT_PLIST="$APP/Contents/Library/LaunchAgents/com.sangtrx.sangkey.agent.plist"
+          test -x "$LAUNCHER_ENTRY"
+          test -f "$LAUNCHER_REAL"
+          test -x "$AGENT"
+          test -f "$AGENT_PLIST"
+          plutil -lint "$AGENT_PLIST"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :BundleProgram' "$AGENT_PLIST")" = 'Contents/Resources/SangKeyAgent'
 
-          echo "== real debug payload linked images =="
-          otool -L "$REAL"
-          if otool -L "$REAL" | grep -Eqi 'SwiftUI|Combine|/libswift|ServiceManagement'; then
-            echo "ERROR: SangKey linked Swift/SwiftUI/Combine/ServiceManagement runtime machinery" >&2
+          echo "== launcher linked images =="
+          otool -L "$LAUNCHER_REAL"
+          if otool -L "$LAUNCHER_REAL" | grep -Eqi 'SwiftUI|Combine|/libswift'; then
+            echo "ERROR: ephemeral launcher linked Swift runtime machinery" >&2
+            exit 1
+          fi
+          otool -L "$LAUNCHER_REAL" | grep -q '/AppKit.framework/'
+          otool -L "$LAUNCHER_REAL" | grep -q '/ServiceManagement.framework/'
+
+          echo "== always-on agent linked images =="
+          otool -L "$AGENT"
+          if otool -L "$AGENT" | grep -Eqi 'AppKit|SwiftUI|Combine|/libswift|ServiceManagement'; then
+            echo "ERROR: always-on SangKeyAgent linked UI/Swift/login-item machinery" >&2
             exit 1
           fi
           test ! -e "$APP/Contents/Resources/EngineUpstream.inc"
-          test -z "$(find platform/macos/App platform/macos/Bridge -type f -name '*.swift' -print 2>/dev/null || true)"
+          test -z "$(find platform/macos/App platform/macos/Agent platform/macos/Shared platform/macos/HeadlessCompat -type f -name '*.swift' -print 2>/dev/null || true)"
 
           echo "== static footprint =="
-          APP_KIB=$(du -sk "$APP" | awk '{print $1}')
-          REAL_BYTES=$(stat -f '%z' "$REAL")
-          echo "Debug app: ${APP_KIB} KiB"
-          echo "Debug real payload: ${REAL_BYTES} bytes"
+          echo "Debug app: $(du -sk "$APP" | awk '{print $1}') KiB"
+          echo "Debug agent: $(stat -f '%z' "$AGENT") bytes"
 
-          echo "== idle footprint smoke =="
-          LOG="$RUNNER_TEMP/sangkey-idle.log"
-          SANGKEY_CI_SMOKE=1 "$ENTRY" >"$LOG" 2>&1 &
+          echo "== headless agent idle footprint =="
+          LOG="$RUNNER_TEMP/sangkey-agent-idle.log"
+          SANGKEY_AGENT_CI_SMOKE=1 "$AGENT" >"$LOG" 2>&1 &
           PID=$!
           trap 'kill "$PID" 2>/dev/null || true' EXIT
           sleep 3
           if ! kill -0 "$PID" 2>/dev/null; then
             cat "$LOG"
-            echo "ERROR: SangKey exited during idle footprint smoke" >&2
+            echo "ERROR: SangKeyAgent exited during idle smoke" >&2
             exit 1
           fi
+          cat "$LOG"
+          grep -q 'dictionaries=yes; AppKit=no' "$LOG"
           RSS_KIB=$(ps -o rss= -p "$PID" | awk '{print $1}')
           CPU_PCT=$(ps -o %cpu= -p "$PID" | awk '{print $1}')
           test -n "$RSS_KIB"
-          echo "SangKey idle RSS with status menu + dictionaries: ${RSS_KIB} KiB"
-          echo "SangKey idle CPU snapshot: ${CPU_PCT}%"
+          echo "SangKeyAgent idle RSS: ${RSS_KIB} KiB"
+          echo "SangKeyAgent idle CPU snapshot: ${CPU_PCT}%"
+          test "$RSS_KIB" -lt 30720 || {
+            echo "ERROR: headless agent exceeded 30 MiB RSS budget" >&2
+            exit 1
+          }
           kill "$PID"
           wait "$PID" || true
           trap - EXIT
@@ -123,7 +142,7 @@ jobs:
       - name: Smoke-test universal Release DMG packaging
         env:
           CODESIGN_IDENTITY: '-'
-          SANGKEY_VERSION: '0.3.0'
+          SANGKEY_VERSION: '0.4.0'
           SANGKEY_ARCHS: 'arm64 x86_64'
           CONFIG: Release
         run: |
@@ -132,21 +151,30 @@ jobs:
 
           APP="build/dd/Build/Products/Release/SangKey.app"
           BIN="$APP/Contents/MacOS/SangKey"
+          AGENT="$APP/Contents/Resources/SangKeyAgent"
+          AGENT_PLIST="$APP/Contents/Library/LaunchAgents/com.sangtrx.sangkey.agent.plist"
           DMG="build/SangKey.dmg"
           test -d "$APP"
+          test -x "$BIN"
+          test -x "$AGENT"
+          test -f "$AGENT_PLIST"
           test -f "$DMG"
           test ! -e "$APP/Contents/Frameworks/Sparkle.framework"
           test ! -e "$APP/Contents/Resources/EngineUpstream.inc"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" = "com.sangtrx.sangkey"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "0.3.0"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "0.4.0"
           lipo "$BIN" -verify_arch arm64 x86_64
-          if otool -L "$BIN" | grep -Eqi 'SwiftUI|Combine|/libswift|ServiceManagement'; then
-            echo "ERROR: Release binary linked non-minimal runtime machinery" >&2
+          lipo "$AGENT" -verify_arch arm64 x86_64
+          if otool -L "$AGENT" | grep -Eqi 'AppKit|SwiftUI|Combine|/libswift|ServiceManagement'; then
+            echo "ERROR: Release agent linked non-headless runtime machinery" >&2
             exit 1
           fi
-          echo "Release architectures: $(lipo "$BIN" -archs)"
-          echo "Release footprint: $(du -sk "$APP" | awk '{print $1}') KiB app; $(stat -f '%z' "$BIN") byte universal binary"
-          codesign --verify --strict --verbose=2 "$APP"
+          echo "Launcher architectures: $(lipo "$BIN" -archs)"
+          echo "Agent architectures: $(lipo "$AGENT" -archs)"
+          echo "Release footprint: $(du -sk "$APP" | awk '{print $1}') KiB app; $(stat -f '%z' "$BIN") byte launcher; $(stat -f '%z' "$AGENT") byte agent"
+          codesign --verify --strict --verbose=2 "$AGENT"
+          test "$(codesign -d --verbose=4 "$AGENT" 2>&1 | awk -F= '/^Identifier=/{print $2; exit}')" = 'com.sangtrx.sangkey.agent'
+          codesign --verify --deep --strict --verbose=2 "$APP"
           codesign --verify --verbose=2 "$DMG"
           hdiutil verify "$DMG"
           shasum -a 256 "$DMG"
