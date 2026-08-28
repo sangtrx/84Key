@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full engine and macOS typing-simulation ASan/UBSan runs in addition to the
   malformed-parser sanitizer suite.
 - A Settings escape hatch for the paced browser/web-editor compatibility path.
+- A dedicated alphanumeric-token regression gate, including sanitizer coverage,
+  for developer-style input such as `dashboard1`, `sha256`, `utf8`, `h264` and
+  `gpt5`, with VNI digit semantics checked separately.
 
 ### Fixed
 
@@ -31,6 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read found by the expanded sanitizer gate.
 - About now points to `sangtrx/84Key` as the hardened source while preserving the
   original `nghialuong/84Key` project and OpenKey attribution separately.
+- Telex and Simple Telex now treat an unshifted digit as a token boundary, so an
+  English/compound restore completes before the digit instead of leaving a
+  temporary Vietnamese accent in alphanumeric code tokens. VNI is excluded from
+  this policy because its numeric keys remain tone/vowel modifiers.
+- Run at Login now reconciles its Settings toggle to the effective
+  `SMAppService` state when registration is rejected or requires approval.
+- Closing onboarding now releases its retained window/SwiftUI hosting tree rather
+  than keeping a hidden first-run window alive for the menu-bar process lifetime.
 
 ### Security
 
@@ -43,6 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   verified before execution.
 - Signing material is destroyed before the artifact helper is invoked, and the
   publish job rechecks `SHA256SUMS` before creating the GitHub Release.
+- The macOS signing job now uses BSD `/usr/bin/base64 -D` for secret decoding;
+  CI executes that exact decoder syntax so a GNU-only flag cannot break the first
+  real tagged release.
 
 ## [0.1.9] - 2026-08-19
 
