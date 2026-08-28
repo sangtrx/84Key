@@ -22,22 +22,26 @@ BOOL LoadDictionaries(NSString *resourceDirectory) {
     if (resourceDirectory == nil) return NO;
 
     // Keep third-party data and SangKey-maintained detector additions separate on
-    // disk so their provenance/licensing remains auditable. EnglishDetect's input
-    // format is intentionally token based, so concatenating the two immutable
-    // byte buffers in memory is equivalent to one word-list stream without
-    // creating another generated artifact that could lose provenance.
+    // disk so provenance/licensing remains auditable. EnglishDetect tokenizes on
+    // non-letters, therefore concatenating reviewed JSON corpora + the small local
+    // supplement in memory yields the same lowercase word stream without adding a
+    // JSON/runtime dependency or a generated artifact whose origin is harder to audit.
     NSString *commonPath = [resourceDirectory stringByAppendingPathComponent:@"english_common_cc0.json"];
+    NSString *nounsPath = [resourceDirectory stringByAppendingPathComponent:@"english_nouns_cc0.json"];
     NSString *supplementPath = [resourceDirectory stringByAppendingPathComponent:@"english_supplement.dat"];
     NSString *vietnamesePath = [resourceDirectory stringByAppendingPathComponent:@"viet_telex.dat"];
 
     NSData *common = [NSData dataWithContentsOfFile:commonPath options:NSDataReadingMappedIfSafe error:nil];
+    NSData *nouns = [NSData dataWithContentsOfFile:nounsPath options:NSDataReadingMappedIfSafe error:nil];
     NSData *supplement = [NSData dataWithContentsOfFile:supplementPath options:NSDataReadingMappedIfSafe error:nil];
     NSData *vietnamese = [NSData dataWithContentsOfFile:vietnamesePath options:NSDataReadingMappedIfSafe error:nil];
-    if (common == nil || supplement == nil || vietnamese == nil) return NO;
+    if (common == nil || nouns == nil || supplement == nil || vietnamese == nil) return NO;
 
-    NSMutableData *english = [NSMutableData dataWithCapacity:common.length + supplement.length + 1];
-    [english appendData:common];
+    NSMutableData *english = [NSMutableData dataWithCapacity:common.length + nouns.length + supplement.length + 2];
     const char newline = '\n';
+    [english appendData:common];
+    [english appendBytes:&newline length:1];
+    [english appendData:nouns];
     [english appendBytes:&newline length:1];
     [english appendData:supplement];
 
