@@ -8,60 +8,73 @@ fail=0
 ok()  { echo "  [PASS] $1"; pass=$((pass + 1)); }
 bad() { echo "  [FAIL] $1"; fail=$((fail + 1)); }
 
-echo "== SangKey distribution + lightweight runtime invariants =="
+echo "== SangKey distribution + ultra-light runtime invariants =="
+
+app=platform/macos/App/SangKeyApp.mm
+project=platform/macos/project.yml
+release=.github/workflows/release.yml
 
 if grep -R -n -E 'import Sparkle|package: Sparkle|SUFeedURL|SUPublicEDKey|SPUStandardUpdaterController' \
-    platform/macos/project.yml platform/macos/Resources/Info.plist \
-    platform/macos/App/UpdaterController.swift tools/package.sh .github/workflows/release.yml >/dev/null 2>&1; then
+    "$project" platform/macos/Resources/Info.plist "$app" tools/package.sh "$release" >/dev/null 2>&1; then
   bad "embedded updater references are present"
 else
   ok "no embedded auto-updater/appcast runtime"
 fi
 
-if grep -q 'NSWorkspace.shared.open' platform/macos/App/UpdaterController.swift && \
-   ! grep -qE 'URLSession|URLRequest|downloadTask|dataTask|Process\(|NSTask|curl|wget' platform/macos/App/UpdaterController.swift; then
-  ok "update check is browser navigation only"
+if grep -q 'github.com/sangtrx/SangKey/releases/latest' "$app" && \
+   grep -q 'openURL:url' "$app" && \
+   ! grep -qE 'NSURLSession|URLSession|URLRequest|downloadTask|dataTask|NSTask|Process\(|curl|wget' "$app"; then
+  ok "update check is user-initiated browser navigation only"
 else
-  bad "update controller gained network/download execution"
+  bad "update path gained an in-process downloader/network client"
 fi
 
 runtime_sensitive=$(grep -nE \
-  'URLSession|URLRequest|NSURLConnection|NWConnection|CFStream(Create|Open)|socket\(|NSPasteboard|SecItem(CopyMatching|Add|Update|Delete)' \
-  platform/macos/App/AppDelegate.swift platform/macos/App/AppController.swift \
-  platform/macos/App/AppSettings.swift platform/macos/App/StatusMenuController.swift \
-  platform/macos/App/SettingsWindowController.swift platform/macos/App/UpdaterController.swift \
-  platform/macos/Input/InputController.mm || true)
+  'NSURLSession|URLSession|URLRequest|NSURLConnection|NWConnection|CFStream(Create|Open)|socket\(|NSPasteboard|SecItem(CopyMatching|Add|Update|Delete)' \
+  "$app" platform/macos/Input/InputController.mm || true)
 if [ -z "$runtime_sensitive" ]; then ok "runtime has no direct network/clipboard/Keychain client"; else echo "$runtime_sensitive"; bad "sensitive runtime API added"; fi
 
-if awk '/func startup\(\)/,/loadDictionaries/' platform/macos/App/AppController.swift | grep -q 'unsetenv("KEY84_TRACE")'; then
+if awk '/applicationDidFinishLaunching/,/loadDictionaries/' "$app" | grep -q 'unsetenv("KEY84_TRACE")'; then
   ok "diagnostic key trace is scrubbed before interception"
 else
   bad "KEY84_TRACE can reach the hardened runtime"
 fi
 
-if grep -q 'PRODUCT_BUNDLE_IDENTIFIER: com.sangtrx.sangkey$' platform/macos/project.yml && \
-   grep -q 'PRODUCT_BUNDLE_IDENTIFIER: com.sangtrx.sangkey.debug$' platform/macos/project.yml; then
+if grep -q 'PRODUCT_BUNDLE_IDENTIFIER: com.sangtrx.sangkey$' "$project" && \
+   grep -q 'PRODUCT_BUNDLE_IDENTIFIER: com.sangtrx.sangkey.debug$' "$project"; then
   ok "SangKey uses independent TCC/code-sign identities"
 else
   bad "SangKey bundle identity is not isolated"
 fi
 
-active_swift=(
-  platform/macos/App/AppDelegate.swift
-  platform/macos/App/AppController.swift
-  platform/macos/App/AppSettings.swift
-  platform/macos/App/LoginItemManager.swift
-  platform/macos/App/StatusMenuController.swift
-  platform/macos/App/SettingsWindowController.swift
-  platform/macos/App/UpdaterController.swift
-)
-if ! grep -nE '^import (SwiftUI|Combine)$' "${active_swift[@]}" >/dev/null && \
-   grep -q -- '- Key84App.swift' platform/macos/project.yml && \
-   grep -q -- '- Settings' platform/macos/project.yml && \
-   grep -q -- '- DesignSystem' platform/macos/project.yml; then
-  ok "shipping Swift layer is AppKit-only with no SwiftUI/Combine"
+swift_sources=$(find platform/macos/App platform/macos/Bridge -type f -name '*.swift' -print 2>/dev/null || true)
+if [ -z "$swift_sources" ] && \
+   grep -q -- '- path: App/SangKeyApp.mm' "$project" && \
+   ! grep -qE 'SWIFT_VERSION|SWIFT_OBJC_BRIDGING_HEADER|ServiceManagement\.framework' "$project"; then
+  ok "macOS host is Objective-C++ only: no Swift, SwiftUI, Combine, bridge, or ServiceManagement"
 else
-  bad "SwiftUI/Combine can enter the shipping compile graph"
+  [ -n "$swift_sources" ] && echo "$swift_sources"
+  bad "non-minimal Swift/ServiceManagement host machinery remains"
+fi
+
+if grep -q 'NSStatusBar.*statusItemWithLength' "$app" && \
+   grep -q 'NSMenu \*_menu' "$app" && \
+   ! grep -qE 'NSWindowController|NSHosting|NSViewController' "$app"; then
+  ok "idle UI is status-item/menu only; no persistent settings window graph"
+else
+  bad "idle UI gained persistent window/view-controller machinery"
+fi
+
+if grep -q 'NSAlert \*alert' "$app" && ! grep -q 'Onboarding' "$project"; then
+  ok "first-run permission prompt is transient AppKit NSAlert"
+else
+  bad "first-run UI can retain a heavyweight onboarding graph"
+fi
+
+if ! grep -R -qE 'ServiceManagement|SMAppService|runOnStartup' "$app" "$project"; then
+  ok "launch-at-login framework/state removed from the keyboard process"
+else
+  bad "login-item machinery remains in the ultra-light runtime"
 fi
 
 mutable_uses=$(grep -R -nE '^[[:space:]]*-[[:space:]]+uses:[[:space:]]+[^@]+@[^#[:space:]]+' .github/workflows \
@@ -69,13 +82,12 @@ mutable_uses=$(grep -R -nE '^[[:space:]]*-[[:space:]]+uses:[[:space:]]+[^@]+@[^#
 if [ -z "$mutable_uses" ]; then ok "GitHub Actions are immutable-SHA pinned"; else echo "$mutable_uses"; bad "mutable GitHub Action ref"; fi
 
 EXPECTED_XCODEGEN_SHA=4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
-if grep -q "$EXPECTED_XCODEGEN_SHA" .github/workflows/ci.yml && grep -q "$EXPECTED_XCODEGEN_SHA" .github/workflows/release.yml; then
+if grep -q "$EXPECTED_XCODEGEN_SHA" .github/workflows/ci.yml && grep -q "$EXPECTED_XCODEGEN_SHA" "$release"; then
   ok "XcodeGen is checksum pinned"
 else
   bad "XcodeGen dependency is not deterministic"
 fi
 
-release=.github/workflows/release.yml
 build_block=$(awk '/^  build-sign-notarize:/,/^  publish:/' "$release")
 publish_block=$(awk '/^  publish:/,0' "$release")
 if echo "$build_block" | grep -q 'contents: read' && ! echo "$build_block" | grep -q 'contents: write' && \
@@ -103,14 +115,14 @@ else
   bad "release provenance gate is incomplete"
 fi
 
-refresh_block=$(awk '/func refresh\(\) -> Bool/,/^    }/' platform/macos/App/AppController.swift)
-if echo "$refresh_block" | grep -Fq 'hasPermission = running || input.hasAccessibilityPermission()'; then
-  ok "live event tap counts as effective Accessibility permission"
+if grep -q 'isRunning.*hasAccessibilityPermission\|isRunning]' "$app" && \
+   grep -q 'tryStartInput' "$app"; then
+  ok "event tap itself is the effective runtime-permission signal"
 else
-  bad "permission UI can disagree with the event tap"
+  bad "Accessibility lifecycle no longer follows the event tap"
 fi
 
-if grep -q 'github.com/sangtrx/SangKey/releases/latest' platform/macos/App/UpdaterController.swift && \
+if grep -q 'github.com/sangtrx/SangKey/releases/latest' "$app" && \
    grep -q 'derived from 84Key/OpenKey' platform/macos/Resources/Info.plist; then
   ok "SangKey brand and upstream provenance are both explicit"
 else
@@ -146,21 +158,6 @@ else
   bad "release credential decoder is not portability tested"
 fi
 
-if grep -q 'static func sync(enabled: Bool) -> Bool' platform/macos/App/LoginItemManager.swift && \
-   grep -q 'setRunOnStartup' platform/macos/App/AppSettings.swift && \
-   grep -q 'reconcileRunOnStartup' platform/macos/App/AppController.swift; then
-  ok "Run at Login follows effective SMAppService state without Combine"
-else
-  bad "Run at Login state can drift from macOS"
-fi
-
-if grep -q 'let alert = NSAlert()' platform/macos/App/AppController.swift && \
-   grep -q -- '- OnboardingView.swift' platform/macos/project.yml; then
-  ok "first-run permission UI is non-retained AppKit, not a SwiftUI tree"
-else
-  bad "onboarding can keep heavyweight UI alive"
-fi
-
 EXPECTED_ENGINE_BLOB=31ed888056436edeb13145c309392b0642f88e7c
 if [ "$(git hash-object core/engine/EngineUpstream.inc)" = "$EXPECTED_ENGINE_BLOB" ] && \
    grep -q '#include "EngineUpstream.inc"' core/engine/Engine.cpp && \
@@ -172,8 +169,8 @@ else
   bad "engine provenance or numeric-boundary gate changed"
 fi
 
-if grep -q 'name: SangKey' platform/macos/project.yml && \
-   grep -q 'MARKETING_VERSION: "0.3.0"' platform/macos/project.yml && \
+if grep -q 'name: SangKey' "$project" && \
+   grep -q 'MARKETING_VERSION: "0.3.0"' "$project" && \
    grep -q 'APP_NAME="SangKey"' tools/package.sh; then
   ok "product/build identity is consistently SangKey 0.3.0"
 else
