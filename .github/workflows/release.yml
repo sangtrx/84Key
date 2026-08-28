@@ -145,6 +145,7 @@ jobs:
           DMG="84Key-${GITHUB_REF_NAME}.dmg"
           mv build/84Key.dmg "build/$DMG"
           test ! -e "$APP/Contents/Frameworks/Sparkle.framework"
+          test ! -e "$APP/Contents/Resources/EngineUpstream.inc"
           (
             cd build
             shasum -a 256 "$DMG" > SHA256SUMS
