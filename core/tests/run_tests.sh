@@ -17,6 +17,14 @@ SIM="${TMPDIR:-/tmp}/key84_typing_sim"
 c++ -std=c++14 -O2 -o "$SIM" typing_sim_test.cpp $ENGINE_SRC
 "$SIM"
 
+# Alphanumeric-token regression: Telex digits end English/code tokens so a
+# pending compound restore happens before the digit; VNI digits remain tone and
+# vowel-modifier keys. This harness mirrors the host's StartNewSession handling
+# for vRestoreAndStartNewSession so multi-digit tokens are covered too.
+ALNUM="${TMPDIR:-/tmp}/key84_alphanumeric_boundary_test"
+c++ -std=c++14 -O2 -o "$ALNUM" alphanumeric_boundary_test.cpp $ENGINE_SRC
+"$ALNUM"
+
 # Drive the real typing paths under ASan/UBSan too. Parser-only sanitization is
 # not enough for a legacy input engine: normal typing exercises state-history,
 # alternate-spelling and restore paths that malformed-file tests never touch.
@@ -30,6 +38,10 @@ env "${SAN_ENV[@]}" "$SAN_ENGINE"
 SAN_SIM="${TMPDIR:-/tmp}/key84_typing_sim_san"
 c++ "${SAN_FLAGS[@]}" -o "$SAN_SIM" typing_sim_test.cpp $ENGINE_SRC
 env "${SAN_ENV[@]}" "$SAN_SIM"
+
+SAN_ALNUM="${TMPDIR:-/tmp}/key84_alphanumeric_boundary_test_san"
+c++ "${SAN_FLAGS[@]}" -o "$SAN_ALNUM" alphanumeric_boundary_test.cpp $ENGINE_SRC
+env "${SAN_ENV[@]}" "$SAN_ALNUM"
 
 # Security regression coverage for serialized OpenKey parsers. Sanitizers are
 # intentional here: malformed length fields used to produce reads past the end
