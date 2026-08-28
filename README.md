@@ -17,8 +17,9 @@ keystrokes 24/7 stays as small as practical:
   `SMAppService` API.
 - **No embedded auto-updater.** Update checks only open GitHub Releases in the browser.
 - **Universal release** (`arm64` + `x86_64`) for macOS 14+.
-- **Hardened release chain** with exact-main provenance, ASan/UBSan gates,
-  immutable action pins, Developer ID signing and Apple notarization.
+- **Hardened release chain** with exact-main provenance, protected Git refs,
+  ASan/UBSan gates, immutable action pins, Developer ID signing, Team ID checks,
+  Apple notarization and Gatekeeper assessment.
 
 ## Architecture
 
@@ -87,20 +88,30 @@ not silently re-enable it.
 
 ## Install
 
-Releases are published at:
+Until the planned GitHub repository rename is completed, the live release URL is:
 
-<https://github.com/sangtrx/SangKey/releases>
+<https://github.com/sangtrx/84Key/releases>
+
+GitHub keeps redirects when a repository is renamed, so this URL remains a safe
+entry point after the repository becomes `sangtrx/SangKey`.
 
 A release contains:
 
 - `SangKey-vX.Y.Z.dmg`
 - `SHA256SUMS`
 
+The DMG itself also contains:
+
+- `LICENSE.txt`
+- `NOTICE.txt`
+- `SOURCE.txt` pointing to the exact corresponding-source commit.
+
 Verify before installation:
 
 ```sh
 shasum -a 256 -c SHA256SUMS
 xcrun stapler validate SangKey-vX.Y.Z.dmg
+spctl -a -t open --context context:primary-signature SangKey-vX.Y.Z.dmg
 ```
 
 Then:
@@ -119,7 +130,7 @@ Avoid running another event-based Vietnamese input utility at the same time.
 Requirements:
 
 - macOS 14+
-- Xcode 26.x
+- **Xcode 26.6 (build 17F113)** for release-reproducible builds
 - XcodeGen 2.46.0
 
 Run the engine/sanitizer/security suite:
