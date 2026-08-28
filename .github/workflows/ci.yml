@@ -88,10 +88,16 @@ jobs:
           LAUNCHER_REAL="$APP/Contents/MacOS/SangKey (DEV).debug.dylib"
           AGENT="$APP/Contents/Resources/SangKeyAgent"
           AGENT_PLIST="$APP/Contents/Library/LaunchAgents/com.sangtrx.sangkey.agent.plist"
+          COMMON="$APP/Contents/Resources/english_common_cc0.json"
+          SUPPLEMENT="$APP/Contents/Resources/english_supplement.dat"
           test -x "$LAUNCHER_ENTRY"
           test -f "$LAUNCHER_REAL"
           test -x "$AGENT"
           test -f "$AGENT_PLIST"
+          test -f "$COMMON"
+          test -f "$SUPPLEMENT"
+          test ! -e "$APP/Contents/Resources/english_words.dat"
+          test "$(git hash-object "$COMMON")" = '8ec4ea53704dfca63f1ee00852c6bcc15411c49e'
           plutil -lint "$AGENT_PLIST"
           test "$(/usr/libexec/PlistBuddy -c 'Print :BundleProgram' "$AGENT_PLIST")" = 'Contents/Resources/SangKeyAgent'
 
@@ -166,8 +172,14 @@ jobs:
           test -f "$DMG"
           test -f build/dist/LICENSE.txt
           test -f build/dist/NOTICE.txt
+          test -f build/dist/THIRD_PARTY_DATA.txt
           test -f build/dist/SOURCE.txt
           grep -Fxq "$SANGKEY_SOURCE_URL" build/dist/SOURCE.txt
+          grep -q '8ec4ea53704dfca63f1ee00852c6bcc15411c49e' build/dist/THIRD_PARTY_DATA.txt
+          test -f "$APP/Contents/Resources/english_common_cc0.json"
+          test -f "$APP/Contents/Resources/english_supplement.dat"
+          test ! -e "$APP/Contents/Resources/english_words.dat"
+          test "$(git hash-object "$APP/Contents/Resources/english_common_cc0.json")" = '8ec4ea53704dfca63f1ee00852c6bcc15411c49e'
           test ! -e "$APP/Contents/Frameworks/Sparkle.framework"
           test ! -e "$APP/Contents/Resources/EngineUpstream.inc"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" = "com.sangtrx.sangkey"
