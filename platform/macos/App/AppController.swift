@@ -1,119 +1,92 @@
 import AppKit
-import Combine
 import Darwin
 
-/// Owns the input controller and coordinates startup, the Accessibility-permission
-/// lifecycle, and the run-at-login item. Publishes `isRunning` / `hasPermission`
-/// so the menu bar and onboarding reflect the real state.
+/// Minimal lifecycle coordinator for SangKey.
 ///
-/// Detecting permission by **trying to start the event tap** is deliberate: for
-/// ad-hoc / development builds `AXIsProcessTrusted()` can lag (the TCC grant is
-/// tied to the code signature, which changes on every rebuild), so a successful
-/// `start()` is the only reliable proof that typing will actually work.
+/// Steady state is event-driven: once the CGEvent tap is alive there is no
+/// polling timer. UI listeners are plain closures / NotificationCenter tokens,
+/// avoiding Combine and SwiftUI runtime machinery entirely.
 @MainActor
-final class AppController: ObservableObject {
+final class AppController {
     static let shared = AppController()
 
     let input = InputController()
 
-    @Published private(set) var isRunning = false
-    @Published private(set) var hasPermission = false
+    private(set) var isRunning = false
+    private(set) var hasPermission = false
+    var onStateChange: (() -> Void)?
 
     private var pollTimer: Timer?
-    private var loginObserver: AnyCancellable?
     private var langObserver: NSObjectProtocol?
-    private var onboarding: OnboardingController?
+
+    private init() {}
 
     func startup() {
-        // The imported OpenKey host contains an opt-in KEY84_TRACE diagnostic
-        // path that can log virtual keycodes. It is useful to upstream
-        // development but is not acceptable in this hardened distribution.
-        // Scrub the variable before the event tap can receive its first key so
-        // even a process launched with KEY84_TRACE=1 cannot enable that path.
         unsetenv("KEY84_TRACE")
 
         let settings = AppSettings.shared
         settings.attach(input)
+        settings.reconcileRunOnStartup()
 
         let dictsLoaded = input.loadDictionaries()
-        NSLog("84Key dictionaries loaded = %@", dictsLoaded ? "YES" : "NO")
+        NSLog("SangKey dictionaries loaded = %@", dictsLoaded ? "YES" : "NO")
 
-        // ServiceManagement is the authority, not the persisted checkbox. A
-        // registration attempt can fail (or require approval), so immediately
-        // fold the effective state back into AppSettings instead of leaving a
-        // lying ON toggle. The second emission after reconciliation is harmless:
-        // `sync` sees the already-effective state and no-ops.
-        let effectiveLoginState = LoginItemManager.sync(enabled: settings.runOnStartup)
-        if settings.runOnStartup != effectiveLoginState {
-            settings.runOnStartup = effectiveLoginState
-        }
-        loginObserver = settings.$runOnStartup
-            .dropFirst()
-            .sink { requested in
-                let effective = LoginItemManager.sync(enabled: requested)
-                if AppSettings.shared.runOnStartup != effective {
-                    AppSettings.shared.runOnStartup = effective
-                }
-            }
-
-        // Mirror hotkey-driven VI/EN toggles (from the global event tap) back into
-        // AppSettings so the menu-bar label and Settings reflect the change. Posted
-        // on the main queue; setting `language` re-pushes the same value (idempotent).
         langObserver = NotificationCenter.default.addObserver(
-            forName: .Key84LanguageDidToggle,
-            object: nil, queue: .main
+            forName: Notification.Name(rawValue: Key84LanguageDidToggleNotification),
+            object: nil,
+            queue: .main
         ) { note in
-            guard let lang = note.userInfo?["language"] as? Int,
-                  AppSettings.shared.language != lang else { return }
-            AppSettings.shared.language = lang
+            guard let lang = note.userInfo?["language"] as? Int else { return }
+            MainActor.assumeIsolated {
+                if AppSettings.shared.language != lang {
+                    AppSettings.shared.language = lang
+                }
+                AppController.shared.onStateChange?()
+            }
         }
 
-        refresh()
+        _ = refresh()
         if !isRunning {
-            presentOnboarding()
+            presentPermissionAlert()
+            startPolling()
         }
-        startPolling()
     }
 
     func shutdown() {
         pollTimer?.invalidate()
         pollTimer = nil
-        loginObserver = nil
         if let langObserver {
             NotificationCenter.default.removeObserver(langObserver)
             self.langObserver = nil
         }
-        onboarding?.dismiss()
-        onboarding = nil
         input.stop()
     }
 
-    /// Re-check permission and (re)start the tap if it isn't running yet. Returns
-    /// whether the tap is now running. A live event tap is stronger evidence than
-    /// AXIsProcessTrusted(), which can lag after the user changes TCC settings, so
-    /// never leave the UI saying permission is missing while typing already works.
     @discardableResult
     func refresh() -> Bool {
+        let oldRunning = isRunning
+        let oldPermission = hasPermission
+
         if !input.isRunning() {
             _ = input.start()
         }
         let running = input.isRunning()
         isRunning = running
         hasPermission = running || input.hasAccessibilityPermission()
+
         if running {
-            onboarding?.dismiss()
-            onboarding = nil
+            stopPolling()
+        }
+        if oldRunning != isRunning || oldPermission != hasPermission {
+            onStateChange?()
         }
         return running
     }
 
     private func startPolling() {
-        pollTimer?.invalidate()
+        guard pollTimer == nil else { return }
         let timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                if self.refresh() { self.stopPolling() }
-            }
+            Task { @MainActor in _ = self?.refresh() }
         }
         RunLoop.main.add(timer, forMode: .common)
         pollTimer = timer
@@ -129,17 +102,22 @@ final class AppController: ObservableObject {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
         }
+        startPolling()
     }
 
-    func presentOnboarding() {
-        if onboarding == nil {
-            onboarding = OnboardingController(controller: self)
+    func presentPermissionAlert() {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Cho phép SangKey xử lý bàn phím"
+        alert.informativeText = "SangKey cần quyền Trợ năng (Accessibility) để gõ tiếng Việt trên toàn hệ thống. Không có dữ liệu gõ nào được gửi ra mạng."
+        alert.addButton(withTitle: "Mở Cài đặt Trợ năng")
+        alert.addButton(withTitle: "Để sau")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            openAccessibilitySettings()
         }
-        onboarding?.present()
     }
 
-    /// Quit and relaunch. After granting Accessibility to a dev/ad-hoc build, a
-    /// fresh process is the most reliable way to pick up the new grant.
     func relaunch() {
         let url = Bundle.main.bundleURL
         let config = NSWorkspace.OpenConfiguration()
