@@ -125,6 +125,15 @@ else
   bad "split-process preference propagation is incomplete"
 fi
 
+if grep -q '@"agentDesiredEnabled": @1' "$prefs" && \
+   grep -q 'if (!SangKeyPreferenceBool(kAgentDesiredEnabled)) return;' "$app" && \
+   grep -q 'SangKeySetPreferenceBool(kAgentDesiredEnabled, YES)' "$app" && \
+   grep -q 'SangKeySetPreferenceBool(kAgentDesiredEnabled, NO)' "$app"; then
+  ok "explicit user disable intent survives reopening the control app"
+else
+  bad "control app can silently undo the user's background-agent choice"
+fi
+
 if grep -q 'SANGKEY_AGENT_CI_SMOKE' "$agent" && \
    grep -q 'dictionaries=yes; AppKit=no' "$agent" && \
    grep -q 'RSS_KIB.*30720\|30720' "$ci"; then
@@ -134,11 +143,20 @@ else
 fi
 
 if grep -q 'SangKeyAgent' "$package" && \
-   grep -q 'codesign --force --options runtime.*"\$AGENT"' "$package" && \
+   grep -q 'codesign --force --identifier "\$AGENT_IDENTIFIER" --options runtime' "$package" && \
    grep -q 'codesign --verify --deep --strict.*"\$APP"' "$package"; then
   ok "nested agent is signed before the enclosing app and deep-verified"
 else
   bad "nested-code signing order/verification is incomplete"
+fi
+
+if grep -q 'AGENT_IDENTIFIER="com.sangtrx.sangkey.agent"' "$package" && \
+   grep -q 'ACTUAL_AGENT_IDENTIFIER' "$package" && \
+   grep -q "codesign -d --verbose=4.*AGENT" "$ci" && \
+   grep -q "codesign -d --verbose=4.*AGENT" "$release"; then
+  ok "agent designated requirement/TCC code identifier is explicit and read-back verified"
+else
+  bad "agent code-signing identifier can drift from com.sangtrx.sangkey.agent"
 fi
 
 if grep -q 'lipo "\$AGENT" -verify_arch arm64 x86_64' "$ci" && \
