@@ -124,7 +124,7 @@ if ! grep -Eqi 'english_words\.dat|google-10000|first20hours|add_argument\("--en
    grep -q 'english_common_cc0.json' "$gen_dict" && \
    grep -q 'english_nouns_cc0.json' "$gen_dict" && \
    grep -q 'english_supplement.dat' "$gen_dict" && \
-   grep -q 'TOKEN_RE = re.compile(rb"\[A-Za-z\]+")' "$gen_dict"; then
+   grep -Fq 'TOKEN_RE = re.compile(rb"[A-Za-z]+")' "$gen_dict"; then
   ok "dictionary generator cannot recreate the removed legacy English payload"
 else
   bad "dictionary generator can reintroduce stale English data or tokenization drift"
