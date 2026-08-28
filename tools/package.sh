@@ -51,11 +51,19 @@ xcodebuild -project "$MACOS/$APP_NAME.xcodeproj" -scheme "$APP_NAME" \
   build >/dev/null
 
 APP="$BUILD/dd/Build/Products/$CONFIG/$APP_NAME.app"
+AGENT="$APP/Contents/Resources/SangKeyAgent"
+AGENT_PLIST="$APP/Contents/Library/LaunchAgents/com.sangtrx.sangkey.agent.plist"
 [ -d "$APP" ] || { echo "ERROR: build did not produce $APP" >&2; exit 1; }
+[ -x "$AGENT" ] || { echo "ERROR: embedded SangKeyAgent is missing" >&2; exit 1; }
+[ -f "$AGENT_PLIST" ] || { echo "ERROR: bundled LaunchAgent plist is missing" >&2; exit 1; }
 
 if [ -n "$CODESIGN_IDENTITY" ]; then
+  # Nested executable must be signed before the enclosing app. The always-on
+  # agent gets its own hardened-runtime signature; then the app seals it.
+  codesign --force --options runtime $TS -s "$CODESIGN_IDENTITY" "$AGENT"
+  codesign --verify --strict --verbose=2 "$AGENT"
   codesign --force --options runtime $TS -s "$CODESIGN_IDENTITY" "$APP"
-  codesign --verify --strict --verbose=2 "$APP"
+  codesign --verify --deep --strict --verbose=2 "$APP"
 fi
 
 DIST="$BUILD/dist"
