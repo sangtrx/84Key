@@ -1,57 +1,52 @@
 # Releasing SangKey (macOS)
 
 Pushing a strict semantic-version tag such as `v0.4.0` triggers
-[`.github/workflows/release.yml`](../.github/workflows/release.yml). Before Apple
-credentials are made available, a secret-free preflight verifies that the tag is
-the exact current `main` commit, the tag matches `MARKETING_VERSION`, the full
-core/security gate passes, **main is protected**, and the release tag itself is a
-**protected ref**.
+[`.github/workflows/release.yml`](../.github/workflows/release.yml). The workflow
+is intentionally fail-closed: source provenance is checked before Apple secrets
+are exposed, the signed/notarized artifact is validated before handoff, and a
+second human approval is required before the GitHub Release becomes public.
 
-Only then does the workflow build universal `arm64 + x86_64` versions of both the
-control launcher and the embedded headless `SangKeyAgent`, sign with the expected
-Developer ID team, notarize the DMG with Apple, run Gatekeeper assessment, compute
-SHA-256, and hand the payload to a separate publish job.
+SangKey has no embedded updater. Users update by explicitly opening the live
+GitHub Releases page in their browser.
 
-SangKey deliberately has **no in-app auto-updater or appcast**. Users update by
-opening the live GitHub Releases page from the control menu and installing a
-signed/notarized DMG themselves.
+## 1. GitHub protections required
 
-## 1. Repository protections required before the first release
-
-The release workflow is intentionally fail-closed. Configure GitHub rulesets so:
+Before the first public release, configure rulesets so:
 
 - `main` is protected;
-- direct/force pushes and deletion of `main` are blocked;
 - PRs are required for `main`;
-- the `Core + security tests` and `Build macOS app + headless agent` checks are
-  required before merge;
+- direct/force pushes and deletion of `main` are blocked;
+- `Core + security tests` and `Build macOS app + headless agent` are required;
 - tags matching `v*` are protected against update/deletion.
 
-The release preflight reads GitHub's protected-ref state. If either `main` or the
+Release preflight reads GitHub's protected-ref state. If either `main` or the
 release tag is unprotected, signing does not start.
 
-The protected `release` environment should also require manual approval for public
-release signing.
+Configure the GitHub environment **`release`** with required reviewers. The
+workflow deliberately uses that protected environment twice:
+
+1. approval before the Developer ID/notarization job authorizes Apple secrets;
+2. approval again before `Publish GitHub Release` lets a human test the exact
+   notarized artifact on a real Mac.
+
+Do not approve the second gate until the acceptance checklist below passes.
 
 ## 2. Required Apple credentials
 
-Create a protected GitHub environment named `release` and add:
+Add these secrets to the protected `release` environment:
 
 | Secret | Purpose |
 | --- | --- |
 | `DEVELOPER_ID_CERT_P12` | base64 Developer ID Application certificate + private key |
 | `DEVELOPER_ID_CERT_PASSWORD` | password of the exported `.p12` |
-| `DEVELOPER_ID_TEAM_ID` | expected Apple Team Identifier; verified from signed agent + app |
+| `DEVELOPER_ID_TEAM_ID` | expected Apple Team Identifier |
 | `ASC_API_KEY_P8` | base64 App Store Connect API `.p8` key |
 | `ASC_API_KEY_ID` | App Store Connect API Key ID |
 | `ASC_API_ISSUER_ID` | App Store Connect API Issuer ID |
 
-There is intentionally **no updater/EdDSA private key**.
+There is intentionally no updater/EdDSA private key.
 
-### Export the Developer ID certificate
-
-Export the Developer ID Application certificate and private key from Keychain
-Access as `devid.p12`, then:
+Example certificate setup:
 
 ```sh
 base64 -i devid.p12 -o devid.p12.b64
@@ -60,10 +55,7 @@ gh secret set DEVELOPER_ID_CERT_PASSWORD --env release
 gh secret set DEVELOPER_ID_TEAM_ID --env release
 ```
 
-### Create the notarization API key
-
-Create an App Store Connect API key with the minimum role required for
-notarization, download its `.p8` file once, then:
+Example notarization key setup:
 
 ```sh
 base64 -i AuthKey_XXXXXX.p8 -o asc.p8.b64
@@ -72,69 +64,78 @@ gh secret set ASC_API_KEY_ID --env release
 gh secret set ASC_API_ISSUER_ID --env release
 ```
 
-Delete local credential exports after loading the secrets:
+Delete local credential exports afterward.
 
-```sh
-rm -f devid.p12 devid.p12.b64 AuthKey_XXXXXX.p8 asc.p8.b64
-```
-
-## 3. Release security model
+## 3. What release CI verifies
 
 ### Secret-free preflight
 
-- runs on Ubuntu with `contents: read` only;
-- accepts only tags matching `vMAJOR.MINOR.PATCH`;
-- verifies the tag checkout is exactly `GITHUB_SHA`;
-- fetches `origin/main` and requires the tag SHA to equal the **current main HEAD**;
-- requires the tag version to match `MARKETING_VERSION`;
-- requires GitHub to report the tag as protected;
-- requires GitHub to report `main` as protected;
-- runs `core/tests/run_tests.sh`, including engine/typing tests, sanitizer runs,
-  parser safety and split-runtime security invariants;
-- has no access to the protected `release` environment or Apple credentials.
+- strict `vMAJOR.MINOR.PATCH` tag;
+- tag checkout equals `GITHUB_SHA`;
+- tag SHA equals current `main` HEAD;
+- tag version equals `MARKETING_VERSION`;
+- tag is protected;
+- `main` is protected;
+- complete engine/sanitizer/security suite passes.
 
 ### Build / sign / notarize
 
-- starts only after preflight succeeds;
-- uses the protected `release` environment;
-- repository permission is **`contents: read` only**;
-- runs on macOS 26 with **Xcode 26.6 build 17F113 pinned exactly**;
-- reusable Actions are immutable-SHA pinned;
-- XcodeGen 2.46.0 is downloaded from its exact GitHub release and verified against
-  SHA-256 `4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806`;
-- builds the launcher and `SangKeyAgent` as universal `arm64 + x86_64` binaries;
-- verifies `SangKeyAgent` does not link AppKit, ServiceManagement, SwiftUI,
-  Combine or the Swift runtime;
-- refuses to fall back to Apple Development for a release build;
-- signs the nested agent first using code identifier
-  **`com.sangtrx.sangkey.agent`** and Hardened Runtime;
-- verifies both nested agent and app are signed by **Developer ID Application**
-  and that both `TeamIdentifier` values equal `DEVELOPER_ID_TEAM_ID`;
-- signs and deep-verifies the enclosing `SangKey.app` only after the nested code
-  has its final signature;
-- verifies the bundled LaunchAgent descriptor points at
-  `Contents/Resources/SangKeyAgent`;
-- signs and notarizes the final DMG;
-- validates the notarization ticket with `stapler`;
-- runs Gatekeeper `spctl` against both the DMG and the mounted application;
-- asserts no Sparkle framework or source-only `EngineUpstream.inc` is shipped;
-- verifies the DMG contains `LICENSE.txt`, `NOTICE.txt`, and `SOURCE.txt` pointing
-  at the exact source commit;
-- creates final `SHA256SUMS` only after notarization/stapling/Gatekeeper checks.
+- exact **Xcode 26.6 build 17F113**;
+- checksum-pinned XcodeGen 2.46.0;
+- universal `arm64 + x86_64` launcher and `SangKeyAgent`;
+- agent has no AppKit, ServiceManagement or Swift runtime linkage;
+- release cannot fall back to Apple Development signing;
+- nested agent identifier is `com.sangtrx.sangkey.agent`;
+- both agent and app are signed by Developer ID Application;
+- both `TeamIdentifier` values equal `DEVELOPER_ID_TEAM_ID`;
+- nested agent is signed before the enclosing app;
+- app and agent signatures verify;
+- DMG is notarized and stapled;
+- DMG and mounted app pass Gatekeeper `spctl` assessment;
+- DMG includes `LICENSE.txt`, `NOTICE.txt`, and `SOURCE.txt` pointing at the exact
+  corresponding-source commit;
+- final `SHA256SUMS` is produced only after those checks.
 
 ### Publish
 
-- receives only the validated DMG and checksum through a short-lived Actions artifact;
-- has **no Apple signing/notarization secrets**;
-- receives `contents: write` only for creating the GitHub Release;
-- verifies `SHA256SUMS` again before publishing;
-- uses GitHub's `gh` CLI instead of a third-party release action.
+The notarized payload is uploaded as a short-lived Actions artifact. The publish
+job has repository `contents: write` but does not reference Apple secrets. It uses
+the same protected `release` environment so required reviewers get a **second
+approval point after the artifact exists**.
 
-## 4. Cut a release
+Before approving that job, download the `notarized-release` artifact from the
+workflow run and perform the acceptance test below.
 
-Update `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` when appropriate, merge to
-`main`, and wait for the **post-merge main CI run** to pass. Then create the tag
-through a protected-tag path that does not permit later movement/deletion.
+## 4. Real-Mac signed-artifact acceptance
+
+Test the exact notarized DMG produced by `build-sign-notarize`, preferably on a
+Mac/user account without an existing SangKey registration:
+
+1. Verify `SHA256SUMS` and `xcrun stapler validate`.
+2. Install `SangKey.app` into `/Applications`.
+3. Launch it once and enable the bundled background input agent.
+4. If macOS reports approval required, approve it under **General → Login Items**.
+5. Grant **Accessibility** to the actual `SangKeyAgent` identity.
+6. Confirm Telex, VNI, English auto-detection, VI/EN hotkey, Spotlight and browser
+   compatibility behavior in representative apps.
+7. Close `SangKey.app`; typing must continue while the AppKit control process is
+   gone.
+8. Log out/in or reboot; the registered agent must return without reopening the
+   control app.
+9. Reopen the control app and confirm background-agent status reflects System
+   Settings accurately.
+10. Disable the agent, close/reopen the control app, and confirm it remains
+    disabled. Re-enable and verify typing returns.
+11. Replace the installed app with the same signed candidate again and confirm
+    Accessibility/code identity remains stable.
+
+If any step fails, **do not approve the publish job**. Fix on `main` and cut the
+next version rather than publishing the failing artifact.
+
+## 5. Cut a release
+
+After post-merge `main` CI is green and repository/environment protections are in
+place:
 
 ```sh
 git switch main
@@ -144,18 +145,18 @@ git tag v0.4.0 "$MAIN_SHA"
 git push origin v0.4.0
 ```
 
-Do not tag a side branch or an older main commit. Release preflight rejects it.
+Do not tag a side branch or an older main commit; preflight rejects it.
 
-## 5. Verify the published payload
+## 6. Verify the published payload
 
 The live repository is currently:
 
 <https://github.com/sangtrx/84Key/releases>
 
-The planned repository rename to `sangtrx/SangKey` can happen later; GitHub keeps
-redirects from the old repository URL after rename.
+A later rename to `sangtrx/SangKey` is safe because GitHub preserves redirects
+from the current repository URL.
 
-Download both the DMG and `SHA256SUMS`, then:
+After publication:
 
 ```sh
 shasum -a 256 -c SHA256SUMS
@@ -163,7 +164,7 @@ xcrun stapler validate SangKey-v0.4.0.dmg
 spctl -a -t open --context context:primary-signature SangKey-v0.4.0.dmg
 ```
 
-After mounting the DMG, verify both launcher and input agent:
+After mounting:
 
 ```sh
 APP="/Volumes/SangKey/SangKey.app"
@@ -171,8 +172,8 @@ AGENT="$APP/Contents/Resources/SangKeyAgent"
 
 codesign --verify --deep --strict --verbose=2 "$APP"
 codesign --verify --strict --verbose=2 "$AGENT"
-codesign -d --verbose=4 "$AGENT"
 codesign -d --verbose=4 "$APP"
+codesign -d --verbose=4 "$AGENT"
 spctl -a -vv --type execute "$APP"
 lipo "$APP/Contents/MacOS/SangKey" -archs
 lipo "$AGENT" -archs
@@ -180,40 +181,28 @@ otool -L "$AGENT"
 cat /Volumes/SangKey/SOURCE.txt
 ```
 
-Confirm:
+Confirm the app ID, agent ID, expected Team ID, universal architectures, no heavy
+agent linkage, notarization, Gatekeeper result and exact source URL.
 
-- app bundle identifier is `com.sangtrx.sangkey`;
-- agent signing identifier is `com.sangtrx.sangkey.agent`;
-- both signed Team Identifiers match the expected release team;
-- both launcher and agent contain `arm64` and `x86_64`;
-- the agent has no AppKit / ServiceManagement / Swift runtime linkage;
-- Developer ID belongs to the SangKey release owner;
-- Apple notarization and Gatekeeper assessment validate;
-- `SOURCE.txt` points at the exact release source commit.
+## 7. Local packaging
 
-## 6. Local packaging
+`tools/package.sh` regenerates the project, builds both products, signs nested code
+in the correct order, copies GPL/provenance/source material, and creates the DMG.
+A notarized build must pass `stapler` and Gatekeeper before the script succeeds.
 
-`tools/package.sh` regenerates the Xcode project from `project.yml`, builds both
-products, embeds the LaunchAgent descriptor, signs nested code in the correct
-order, copies GPL/provenance/source material, then creates the DMG.
-
-A normal local package can use a local development/ad-hoc identity. A release build
-sets `SANGKEY_REQUIRE_DEVELOPER_ID=1` and `SANGKEY_EXPECTED_TEAM_ID` so it cannot
-fall back to an Apple Development signer.
-
-To reproduce the universal release architecture locally:
+A normal local package may use a development/ad-hoc identity. Public release sets
+`SANGKEY_REQUIRE_DEVELOPER_ID=1` and `SANGKEY_EXPECTED_TEAM_ID`, so it cannot
+silently fall back to Apple Development.
 
 ```sh
 SANGKEY_ARCHS="arm64 x86_64" bash tools/package.sh
 ```
 
-## 7. Updating users
+## 8. Updating users
 
-There is no background update check. The control menu item **Kiểm tra cập nhật…**
-currently opens:
+The control menu item **Kiểm tra cập nhật…** currently opens:
 
 <https://github.com/sangtrx/84Key/releases/latest>
 
-The browser/download flow is outside the always-on input agent. The old repository
-URL is intentionally used until the GitHub rename is actually completed, because
-it resolves today and GitHub redirects it after rename.
+The current URL intentionally resolves before the planned repository rename and
+will redirect afterward.
