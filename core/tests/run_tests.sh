@@ -4,18 +4,24 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# The runtime ships two auditable English sources: an exact vendored CC0 corpus
-# plus a small SangKey-maintained supplement. Legacy harnesses intentionally keep
-# reading ../data/english_words.dat, so synthesize that compatibility stream only
-# for this test process. The old tracked google-10000-derived payload must never
-# return to the repository or release bundle.
+# Runtime English detection is built from byte-pinned CC0 corpora plus a small
+# SangKey-maintained supplement. Legacy harnesses intentionally keep reading
+# ../data/english_words.dat, so synthesize that compatibility stream only for
+# this test process. The obsolete google-10000-derived payload must never return
+# to the repository or release bundle.
 COMMON="../data/english_common_cc0.json"
+NOUNS="../data/english_nouns_cc0.json"
 SUPPLEMENT="../data/english_supplement.dat"
 LEGACY_FIXTURE="../data/english_words.dat"
-EXPECTED_CORPORA_BLOB="8ec4ea53704dfca63f1ee00852c6bcc15411c49e"
+EXPECTED_COMMON_BLOB="8ec4ea53704dfca63f1ee00852c6bcc15411c49e"
+EXPECTED_NOUNS_BLOB="aca4efb20de9becfd3f949c73e97297be26574f4"
 
-test "$(git hash-object "$COMMON")" = "$EXPECTED_CORPORA_BLOB" || {
-  echo "ERROR: vendored CC0 English corpus drifted from the reviewed upstream blob" >&2
+test "$(git hash-object "$COMMON")" = "$EXPECTED_COMMON_BLOB" || {
+  echo "ERROR: vendored CC0 common-word corpus drifted from the reviewed upstream blob" >&2
+  exit 1
+}
+test "$(git hash-object "$NOUNS")" = "$EXPECTED_NOUNS_BLOB" || {
+  echo "ERROR: vendored CC0 noun corpus drifted from the reviewed upstream blob" >&2
   exit 1
 }
 LC_ALL=C sort -cu "$SUPPLEMENT"
@@ -25,7 +31,7 @@ if git ls-files --error-unmatch "$LEGACY_FIXTURE" >/dev/null 2>&1; then
 fi
 cleanup_english_fixture() { rm -f "$LEGACY_FIXTURE"; }
 trap cleanup_english_fixture EXIT
-cat "$COMMON" "$SUPPLEMENT" > "$LEGACY_FIXTURE"
+cat "$COMMON" "$NOUNS" "$SUPPLEMENT" > "$LEGACY_FIXTURE"
 
 ENGINE_SRC="../engine/Engine.cpp ../engine/Vietnamese.cpp ../engine/Macro.cpp \
             ../engine/SmartSwitchKey.cpp ../engine/ConvertTool.cpp ../engine/EnglishDetect.cpp"
