@@ -45,6 +45,19 @@ void PreferencesChanged(CFNotificationCenterRef center,
     });
 }
 
+void ScheduleAccessibilityRetry(InputController *input, NSTimeInterval delay) {
+    // Accessibility approval is human-paced. Retrying CGEventTapCreate every
+    // second forever only creates needless wakeups while System Settings is open.
+    // Back off quickly, cap at 15 s, and stop scheduling as soon as the tap works.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        if ([input isRunning]) return;
+        if ([input start]) return;
+        NSTimeInterval nextDelay = MIN(delay * 2.0, 15.0);
+        ScheduleAccessibilityRetry(input, nextDelay);
+    });
+}
+
 } // namespace
 
 int main(int argc, const char *argv[]) {
@@ -87,16 +100,8 @@ int main(int argc, const char *argv[]) {
                 // authorizes the correct code identity rather than the ephemeral
                 // launcher process.
                 [input requestAccessibilityPermission];
+                ScheduleAccessibilityRetry(input, 1.0);
             }
-
-            NSTimer *retry = [NSTimer timerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *timer) {
-                if ([input isRunning]) {
-                    [timer invalidate];
-                    return;
-                }
-                [input start];
-            }];
-            [[NSRunLoop mainRunLoop] addTimer:retry forMode:NSRunLoopCommonModes];
         }
 
         [[NSRunLoop mainRunLoop] run];
