@@ -125,6 +125,7 @@ cp -R "$APP" "$DIST/"
 ln -sf /Applications "$DIST/Applications"
 cp "$ROOT/LICENSE" "$DIST/LICENSE.txt"
 cp "$ROOT/NOTICE" "$DIST/NOTICE.txt"
+cp "$ROOT/core/data/ENGLISH_WORDS_PROVENANCE.md" "$DIST/THIRD_PARTY_DATA.txt"
 printf 'Corresponding source for this build:\n%s\n' "$SOURCE_URL" > "$DIST/SOURCE.txt"
 
 DMG="$BUILD/$APP_NAME.dmg"
