@@ -8,6 +8,7 @@
 
 #import <Foundation/Foundation.h>
 #import <ApplicationServices/ApplicationServices.h>
+#include <unistd.h>
 
 #define NSWorkspace SangKeyWorkspaceCompat
 #define NSRunningApplication SangKeyRunningApplicationCompat
