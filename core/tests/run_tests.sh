@@ -13,6 +13,7 @@ COMMON="../data/english_common_cc0.json"
 NOUNS="../data/english_nouns_cc0.json"
 SUPPLEMENT="../data/english_supplement.dat"
 VIET="../data/viet_telex.dat"
+CASES_DIR="cases"
 LEGACY_FIXTURE="../data/english_words.dat"
 EXPECTED_COMMON_BLOB="8ec4ea53704dfca63f1ee00852c6bcc15411c49e"
 EXPECTED_NOUNS_BLOB="aca4efb20de9becfd3f949c73e97297be26574f4"
@@ -47,29 +48,62 @@ cat "$COMMON" "$NOUNS" "$SUPPLEMENT" > "$PRODUCTION_DICT"
 #      adversarial superset that deliberately makes canonical and alternate
 #      Vietnamese key strings look like English compounds. In this pass the
 #      original 20/50 floors remain mandatory — they are not lowered or bypassed.
-python3 - "$PRODUCTION_DICT" "$VIET" "$ADVERSARIAL_DICT" <<'PY'
+#
+# Adversarial data must not invalidate the simulator's negative controls. Parse
+# fixture lines where expected output differs from the raw alpha token and forbid
+# synthetic prefix/suffix pieces that could make that raw token a fake compound.
+python3 - "$PRODUCTION_DICT" "$VIET" "$CASES_DIR" "$ADVERSARIAL_DICT" <<'PY'
 import sys
 from pathlib import Path
 
 production = Path(sys.argv[1]).read_bytes()
 words = [w.strip() for w in Path(sys.argv[2]).read_text(encoding="utf-8").splitlines() if w.strip()]
-out = Path(sys.argv[3])
+cases_dir = Path(sys.argv[3])
+out = Path(sys.argv[4])
 fragments = set()
+protected_fragments = set()
 transform = set("sfrxjwaeod")
+
+
+def split_pieces(value: str):
+    for k in range(3, len(value) - 2):
+        yield value[:k], value[k:]
+
+
+for fixture in sorted(cases_dir.glob("*.txt")):
+    for raw_line in fixture.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(("#", "@")):
+            continue
+        if " => " in line:
+            keys, expected = line.split(" => ", 1)
+        elif "\t" in line:
+            keys, expected = line.split("\t", 1)
+        else:
+            continue
+        raw_token = keys.strip().split(" ", 1)[0]
+        expected_token = expected.strip().split(" ", 1)[0]
+        if raw_token == expected_token or not raw_token.isalpha() or not raw_token.islower():
+            continue
+        for left, right in split_pieces(raw_token):
+            protected_fragments.add(left)
+            protected_fragments.add(right)
 
 
 def add_compound_fragments(value: str) -> None:
     if not (6 <= len(value) <= 32) or not value.isalpha() or not value.islower():
         return
-    splits = list(range(3, len(value) - 2))
+    candidates = list(split_pieces(value))
     # Prefer a first piece whose final key is not itself a Telex transform key;
     # that keeps this property focused on word-break compound restore instead of
     # manufacturing an unrelated mid-word simple-English takeover.
-    preferred = [k for k in splits if value[k - 1] not in transform]
-    chosen = preferred[:1] or splits[:1]
-    for k in chosen:
-        fragments.add(value[:k])
-        fragments.add(value[k:])
+    candidates.sort(key=lambda pair: pair[0][-1] in transform)
+    for left, right in candidates:
+        if left in protected_fragments or right in protected_fragments:
+            continue
+        fragments.add(left)
+        fragments.add(right)
+        return
 
 
 for w in words:
