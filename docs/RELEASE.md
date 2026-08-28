@@ -1,196 +1,143 @@
-# Releasing 84Key (macOS)
+# Releasing the hardened 84Key fork (macOS)
 
-Pushing a version tag (e.g. `v0.1.0`) triggers
-[`.github/workflows/release.yml`](../.github/workflows/release.yml), which builds,
-signs, **notarizes**, and attaches a `.dmg` to a new GitHub Release.
+Pushing a version tag (for example `v0.2.0`) triggers
+[`.github/workflows/release.yml`](../.github/workflows/release.yml). The workflow
+builds the app, signs it with Developer ID, notarizes the DMG with Apple, computes
+a SHA-256 checksum, then hands the result to a separate job that publishes the
+GitHub Release.
 
-The workflow needs an Apple Developer account. All credentials live in **GitHub
-encrypted secrets** under the `release` environment — they are never committed and
-GitHub masks them in CI logs. Set them up once with the steps below.
+This fork deliberately has **no in-app auto-updater or appcast**. Users update by
+opening the GitHub Releases page from the menu and installing a signed/notarized
+DMG themselves. This removes the updater framework, installer helpers, updater
+signing key, and background network path from the Accessibility-enabled process.
 
-## 1. Prerequisites
+## 1. Required Apple credentials
 
-- A paid **Apple Developer** account.
-- A **Developer ID Application** certificate (Keychain Access → Certificate
-  Assistant, or download from the Apple Developer portal) with its private key in
-  your login keychain.
-- The [`gh`](https://cli.github.com) CLI, authenticated (`gh auth login`).
+Create a protected GitHub environment named `release` and add:
 
-## 2. Export the signing certificate
+| Secret | Purpose |
+| --- | --- |
+| `DEVELOPER_ID_CERT_P12` | base64 Developer ID Application certificate + private key |
+| `DEVELOPER_ID_CERT_PASSWORD` | password of the exported `.p12` |
+| `ASC_API_KEY_P8` | base64 App Store Connect API `.p8` key |
+| `ASC_API_KEY_ID` | App Store Connect API Key ID |
+| `ASC_API_ISSUER_ID` | App Store Connect API Issuer ID |
 
-In **Keychain Access**, find *Developer ID Application: …*, expand it, select both
-the certificate **and** its private key, right-click → **Export 2 items…**, save as
-`devid.p12`, and set an export password (you'll store it as a secret too).
+There is intentionally **no updater/EdDSA private key** in this fork.
 
-Base64-encode it (CI decodes it back):
+### Export the Developer ID certificate
+
+Export the Developer ID Application certificate and private key from Keychain
+Access as `devid.p12`, then:
 
 ```sh
 base64 -i devid.p12 -o devid.p12.b64
+gh secret set DEVELOPER_ID_CERT_P12 --env release < devid.p12.b64
+gh secret set DEVELOPER_ID_CERT_PASSWORD --env release
 ```
 
-## 3. Create an App Store Connect API key (for notarization)
+### Create the notarization API key
 
-In [App Store Connect](https://appstoreconnect.apple.com) → **Users and Access** →
-**Integrations / Keys** → **App Store Connect API**: create a key with the
-**Developer** role, download the `AuthKey_XXXXXX.p8` (one-time download), and note:
-
-- **Key ID** (e.g. `ABCDE12345`)
-- **Issuer ID** (a UUID at the top of the Keys page)
-
-Base64-encode the key:
+Create an App Store Connect API key with the minimum role required for
+notarization, download its `.p8` file once, then:
 
 ```sh
 base64 -i AuthKey_XXXXXX.p8 -o asc.p8.b64
+gh secret set ASC_API_KEY_P8 --env release < asc.p8.b64
+gh secret set ASC_API_KEY_ID --env release
+gh secret set ASC_API_ISSUER_ID --env release
 ```
 
-## 4. Load the secrets (nothing is printed or committed)
-
-Create the `release` environment in **Settings → Environments** on GitHub (optionally
-restrict it to tag refs), then set the secrets via `gh` — values are read from files
-or typed at a prompt, never echoed:
-
-```sh
-gh secret set DEVELOPER_ID_CERT_P12      --env release < devid.p12.b64
-gh secret set DEVELOPER_ID_CERT_PASSWORD --env release   # paste the .p12 export password
-gh secret set ASC_API_KEY_P8             --env release < asc.p8.b64
-gh secret set ASC_API_KEY_ID             --env release   # paste the Key ID
-gh secret set ASC_API_ISSUER_ID          --env release   # paste the Issuer ID
-```
-
-Then delete the local sensitive files:
+Delete local credential exports after loading the secrets:
 
 ```sh
 rm -f devid.p12 devid.p12.b64 AuthKey_XXXXXX.p8 asc.p8.b64
 ```
 
-| Secret | What it is |
-| --- | --- |
-| `DEVELOPER_ID_CERT_P12` | base64 of the `.p12` (cert + private key) |
-| `DEVELOPER_ID_CERT_PASSWORD` | the `.p12` export password |
-| `ASC_API_KEY_P8` | base64 of the App Store Connect `.p8` key |
-| `ASC_API_KEY_ID` | the API Key ID |
-| `ASC_API_ISSUER_ID` | the API Issuer ID |
-| `SPARKLE_PRIVATE_ED_KEY` | Sparkle EdDSA **private** key (see §7) |
+## 2. Release security model
 
-## 5. Cut a release
+The workflow has two jobs with deliberately different authority.
 
-```sh
-git tag v0.1.0
-git push origin v0.1.0
-```
+### Build / sign / notarize
 
-Watch **Actions → Release**. On success a GitHub Release is created with
-`84Key-v0.1.0.dmg` attached. The tag version (minus the `v`) is baked into the app's
-`MARKETING_VERSION`.
+- protected `release` environment;
+- Apple credentials are available here;
+- GitHub repository permission is **`contents: read` only**;
+- `actions/checkout` is pinned to an immutable commit SHA;
+- XcodeGen 2.46.0 is downloaded from its exact GitHub release URL and checked
+  against SHA-256
+  `4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806`
+  before execution;
+- the final DMG is Developer ID signed and Apple notarized;
+- the workflow asserts that no `Sparkle.framework` is embedded;
+- a final `SHA256SUMS` file is generated after notarization/stapling.
 
-> **Bump the build number first.** Sparkle decides "is this newer?" by comparing
-> `CFBundleVersion` (`CURRENT_PROJECT_VERSION` in `platform/macos/project.yml`), not
-> the marketing version. Increment it for every release (1 → 2 → 3 …), otherwise the
-> appcast advertises an update Sparkle won't treat as newer.
+### Publish
 
-Dry run: push a pre-release tag like `v0.0.1-rc1` first, then delete it and the draft
-Release once verified (`git push --delete origin v0.0.1-rc1`).
+- receives only the notarized DMG and checksum through a short-lived GitHub
+  Actions artifact;
+- has **no Apple signing/notarization secrets**;
+- receives `contents: write` only for creating the GitHub Release;
+- verifies `SHA256SUMS` again before publishing;
+- uses the GitHub-hosted `gh` CLI instead of a third-party release action.
 
-## 6. Verify the DMG
+This separation means a publish-step compromise does not receive the Developer
+ID certificate or App Store Connect key, while code running with those Apple
+credentials cannot modify repository contents or publish a release.
 
-On another Mac, downloading the DMG and running:
+## 3. Cut a release
 
-```sh
-xcrun stapler validate 84Key-v0.1.0.dmg
-spctl -a -t open --context context:primary-signature 84Key-v0.1.0.dmg
-```
-
-Both should pass, and the app should open without a Gatekeeper warning.
-
-## 7. Auto-update (Sparkle)
-
-84Key updates itself with [Sparkle](https://github.com/sparkle-project/Sparkle). The
-app checks an **appcast** feed daily (and on demand via the menu's *Kiểm tra cập
-nhật…*), downloads the new DMG straight from GitHub Releases, and verifies it with an
-**EdDSA signature** — a Sparkle-specific signature that is *separate* from Apple
-code-signing/notarization.
-
-The release workflow signs each DMG and writes a new `<item>` into `appcast.xml` on the
-**`gh-pages`** branch. The app reads that file **raw over HTTPS** at
-`https://raw.githubusercontent.com/nghialuong/84Key/gh-pages/appcast.xml` (the `SUFeedURL`
-in `Info.plist`). The DMG keeps living on GitHub Releases; the appcast only points at its
-per-tag download URL. **Pre-release tags (anything with a `-`, e.g. `v0.1.0-rc1`) still
-publish a Release but are not added to the appcast**, so stable users are never offered a
-pre-release.
-
-> **Why `raw.githubusercontent.com` and not GitHub Pages?** This account serves its
-> apex domain `nghialuong.com` from Vercel, and the `nghialuong.github.io` user site
-> has that as a custom domain — so GitHub 301-redirects every Pages *project* URL
-> (`nghialuong.github.io/84Key/…`) to `nghialuong.com/84Key/…`, which Vercel 404s.
-> `raw.githubusercontent.com` sidesteps that entirely: it serves the file from the
-> public repo over HTTPS with no redirect (`Content-Type: text/plain`, which Sparkle
-> parses fine). Both the repo being **public** and the feed URL matter here — a private
-> repo's raw files and release assets require auth and can't be fetched by the updater.
-
-This is a **one-time setup**. Do it once, then releases are automatic. It assumes the
-repo is **public** (required so end users can download release DMGs and read the feed).
-
-### 7a. Generate the EdDSA key pair
-
-After the project has fetched Sparkle once (any local build, or run
-`xcodegen generate && xcodebuild -resolvePackageDependencies` in `platform/macos`), the
-key tools live under DerivedData. From the repo root after a `bash tools/package.sh`:
+Update `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` in
+`platform/macos/project.yml` when appropriate, merge the change to `main`, then
+tag the exact commit you intend to ship:
 
 ```sh
-BIN=build/dd/SourcePackages/artifacts/sparkle/Sparkle/bin
-"$BIN/generate_keys"                 # stores the PRIVATE key in your login Keychain,
-                                     # prints the PUBLIC key (base64) — copy it
-"$BIN/generate_keys" -x sparkle_private_key.txt   # export the PRIVATE key for CI
+git switch main
+git pull --ff-only
+git tag v0.2.0 <EXACT_COMMIT_SHA>
+git push origin v0.2.0
 ```
 
-- Paste the printed **public** key into `platform/macos/Resources/Info.plist`, replacing
-  `REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY` in `SUPublicEDKey`. (It ships inside the app and
-  is safe to commit.)
-- Load the exported **private** key as a secret, then delete the file:
+The release workflow verifies that the checked-out commit is exactly
+`GITHUB_SHA` for the tag before importing signing credentials.
+
+## 4. Verify the published payload
+
+Download both the DMG and `SHA256SUMS` from the GitHub Release:
 
 ```sh
-gh secret set SPARKLE_PRIVATE_ED_KEY --env release < sparkle_private_key.txt
-rm -f sparkle_private_key.txt
+shasum -a 256 -c SHA256SUMS
+xcrun stapler validate 84Key-v0.2.0.dmg
+spctl -a -t open --context context:primary-signature 84Key-v0.2.0.dmg
 ```
 
-> Keep the private key safe. If it's ever lost, existing installs can't verify future
-> updates and users must re-download manually; if it leaks, rotate it (new key pair →
-> new public key in `Info.plist` → ship that build before signing further updates).
-
-### 7b. The `gh-pages` branch (appcast home)
-
-The appcast lives on an orphan **`gh-pages`** branch (it holds only `appcast.xml` plus a
-`.nojekyll`). It's already created and seeded with an empty feed; the release workflow
-appends to it. No GitHub Pages site is needed — the feed is read raw. Confirm it's
-reachable:
+After mounting the DMG, you can additionally verify the application:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/nghialuong/84Key/gh-pages/appcast.xml | head
+codesign --verify --deep --strict --verbose=2 /Volumes/84Key/84Key.app
+codesign -dv --verbose=4 /Volumes/84Key/84Key.app
 ```
 
-> `raw.githubusercontent.com` is CDN-cached for ~5 minutes, which is fine for an
-> update feed. If you later want a branded/faster feed, point Sparkle at a real host
-> (e.g. add an `appcast.xml` route to the `nghialuong.com` Vercel site, or a Pages
-> site on a domain that isn't shadowed) and update `SUFeedURL`.
+Confirm the bundle identifier is `com.sangtrx.key84` and the signing identity is
+the one controlled by this fork's release owner.
 
-### 7c. How a release feeds the updater
+## 5. Local packaging
 
-Each stable release, the workflow (`Update Sparkle appcast` step) automatically:
+`tools/package.sh` always regenerates the Xcode project from `project.yml` before
+building. Install XcodeGen yourself for local development and verify the source
+or package you use. CI does **not** use Homebrew for XcodeGen; it uses the
+checksum-pinned release archive described above.
 
-1. Signs `84Key-vX.Y.Z.dmg` with the EdDSA private key (`sign_update`).
-2. Runs [`tools/update_appcast.py`](../tools/update_appcast.py) to splice a new
-   newest-first `<item>` into `appcast.xml` (preserving older items and their per-tag
-   download URLs), then commits and pushes it to `gh-pages`.
+For a local notarized build, configure either a notarytool keychain profile or
+the `KEY84_ASC_KEY_PATH`, `KEY84_ASC_KEY_ID`, and `KEY84_ASC_ISSUER_ID`
+environment variables documented in `tools/package.sh`.
 
-No manual steps once 7a is done — just bump the build number and push a tag (§5).
+## 6. Updating users
 
-## How secrets stay safe
+There is no background update check. The menu item **Kiểm tra cập nhật…** opens:
 
-- Stored as **GitHub encrypted secrets** in the `release` environment; GitHub
-  auto-masks them in logs.
-- The workflow only triggers on **tag pushes**, so pull requests from forks can never
-  run it or read the secrets.
-- The job imports the certificate into a **temporary keychain** with a random password
-  and **deletes the keychain and key files** on completion (even on failure).
-- The workflow requests only `contents: write` (enough to publish a Release).
-- Build artifacts (`build/`, `*.dmg`, `*.app`) are git-ignored — never committed.
+<https://github.com/sangtrx/84Key/releases/latest>
+
+The browser/download flow is intentionally outside the keyboard process. Users
+should install only a release whose checksum, Developer ID signature, and Apple
+notarization validate successfully.
