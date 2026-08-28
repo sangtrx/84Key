@@ -149,11 +149,32 @@ fi
 #     silently turns the documented macOS 14+ release into Apple-Silicon-only.
 if grep -q "KEY84_ARCHS: 'arm64 x86_64'" .github/workflows/ci.yml && \
    grep -q "KEY84_ARCHS: 'arm64 x86_64'" "$release" && \
-   grep -q 'lipo -verify_arch arm64 x86_64' .github/workflows/ci.yml && \
-   grep -q 'lipo -verify_arch arm64 x86_64' "$release"; then
+   grep -q 'lipo .* -verify_arch arm64 x86_64' .github/workflows/ci.yml && \
+   grep -q 'lipo .* -verify_arch arm64 x86_64' "$release"; then
   ok "CI and release require universal arm64+x86_64 artifacts"
 else
   bad "release architecture is not explicitly universal and verified"
+fi
+
+# 14. GitHub is removing the Node 20 action runtime. Keep the two artifact
+#     handoff actions on official Node 24 releases and immutable SHAs so release
+#     publication does not depend on GitHub silently forcing a deprecated runtime.
+UPLOAD_V6=b7c566a772e6b6bfb58ed0dc250532a479d7789f
+DOWNLOAD_V7=37930b1c2abaa49bbe596cd826c3c89aef350131
+if grep -q "actions/upload-artifact@$UPLOAD_V6" "$release" && \
+   grep -q "actions/download-artifact@$DOWNLOAD_V7" "$release"; then
+  ok "artifact handoff actions are pinned to official Node 24 releases"
+else
+  bad "artifact handoff actions are not on the reviewed Node 24 pins"
+fi
+
+# 15. CHR() is the legacy engine's shared relative-index accessor. Some normal
+#     typing paths probe `_index - 1` before a dedicated zero-index branch; keep
+#     the accessor bounded so those probes cannot become TypingWord[-1] UB.
+if grep -Fq '#define CHR(index) (((index) >= 0 && (index) < MAX_BUFF)' core/engine/DataType.h; then
+  ok "legacy character-buffer accessor is bounds checked"
+else
+  bad "CHR() can read outside the typing buffer"
 fi
 
 echo
