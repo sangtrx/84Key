@@ -49,8 +49,19 @@ static NSString * const kRepoReleases = @"https://github.com/sangtrx/SangKey/rel
 
     _input = [InputController new];
     [self applyAllOptions];
-    BOOL dictionariesReady = [_input loadDictionaries];
-    NSLog(@"SangKey dictionaries loaded = %@", dictionariesReady ? @"YES" : @"NO");
+
+    // Measurement-only mode: CI can start the exact same host/engine heap while
+    // skipping dictionary materialization. Comparing this process with the full
+    // SANGKEY_CI_SMOKE process isolates the incremental RSS of both dictionaries
+    // from AppKit/Foundation/process baseline. Normal launches never set this.
+    BOOL ciSmoke = getenv("SANGKEY_CI_SMOKE") != NULL;
+    BOOL ciBaseline = ciSmoke && getenv("SANGKEY_CI_SMOKE_BASELINE") != NULL;
+    BOOL dictionariesReady = ciBaseline ? NO : [_input loadDictionaries];
+    if (ciBaseline) {
+        NSLog(@"SangKey CI baseline: dictionaries intentionally skipped");
+    } else {
+        NSLog(@"SangKey dictionaries loaded = %@", dictionariesReady ? @"YES" : @"NO");
+    }
 
     __weak SangKeyAppDelegate *weakSelf = self;
     _languageObserver = [[NSNotificationCenter defaultCenter]
@@ -72,11 +83,10 @@ static NSString * const kRepoReleases = @"https://github.com/sangtrx/SangKey/rel
     _statusItem.menu = _menu;
 
     // CI footprint mode intentionally stops before TCC/event-tap interaction but
-    // after the real steady-state heap has been created: AppKit status item/menu,
-    // engine globals and both English/Vietnamese dictionaries are resident. This
-    // lets CI measure an apples-to-apples idle RSS without opening a permission
-    // dialog or depending on Accessibility grants on the hosted runner.
-    if (getenv("SANGKEY_CI_SMOKE") != NULL) {
+    // after the requested steady-state heap has been created. The normal smoke
+    // includes both dictionaries; SANGKEY_CI_SMOKE_BASELINE skips only those
+    // dictionaries so CI can quantify their incremental memory cost.
+    if (ciSmoke) {
         [self rebuildMenu];
         return;
     }
