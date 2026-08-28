@@ -1,0 +1,75 @@
+name: Headless RSS Probe
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode 26
+        run: |
+          set -euo pipefail
+          XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          test -n "$XCODE"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+
+      - name: Build realistic no-AppKit agent probe
+        run: |
+          set -euo pipefail
+          clang++ \
+            -std=c++14 \
+            -fobjc-arc \
+            -fmodules \
+            -mmacosx-version-min=14.0 \
+            platform/macos/tests/headless_rss_probe.mm \
+            core/engine/EnglishDetect.cpp \
+            -Icore/engine \
+            -framework Foundation \
+            -framework ApplicationServices \
+            -framework Carbon \
+            -framework Security \
+            -o "$RUNNER_TEMP/sangkey-headless-probe"
+
+          echo "== linked images =="
+          otool -L "$RUNNER_TEMP/sangkey-headless-probe"
+          if otool -L "$RUNNER_TEMP/sangkey-headless-probe" | grep -q '/AppKit.framework/'; then
+            echo "ERROR: headless probe unexpectedly links AppKit" >&2
+            exit 1
+          fi
+          stat -f '%z bytes probe binary' "$RUNNER_TEMP/sangkey-headless-probe"
+
+      - name: Measure headless idle RSS
+        run: |
+          set -euo pipefail
+          LOG="$RUNNER_TEMP/headless-probe.log"
+          "$RUNNER_TEMP/sangkey-headless-probe" >"$LOG" 2>&1 &
+          PID=$!
+          trap 'kill "$PID" 2>/dev/null || true' EXIT
+          sleep 3
+          if ! kill -0 "$PID" 2>/dev/null; then
+            cat "$LOG"
+            exit 1
+          fi
+          cat "$LOG"
+          RSS_KIB=$(ps -o rss= -p "$PID" | awk '{print $1}')
+          CPU_PCT=$(ps -o %cpu= -p "$PID" | awk '{print $1}')
+          echo "No-AppKit agent probe: ${RSS_KIB} KiB RSS; ${CPU_PCT}% CPU snapshot"
+          {
+            echo "### No-AppKit SangKey feasibility"
+            echo "- RSS: **${RSS_KIB} KiB**"
+            echo "- CPU snapshot: **${CPU_PCT}%**"
+            echo "- Includes Foundation + ApplicationServices + Carbon + Security + both dictionaries."
+          } >> "$GITHUB_STEP_SUMMARY"
+          kill "$PID"
+          wait "$PID" || true
+          trap - EXIT
