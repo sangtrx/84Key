@@ -20,6 +20,7 @@ project=platform/macos/project.yml
 ci=.github/workflows/ci.yml
 release=.github/workflows/release.yml
 package=tools/package.sh
+gen_dict=tools/gen_dict.py
 
 # Runtime/privacy surface.
 if grep -R -n -E 'import Sparkle|package: Sparkle|SUFeedURL|SUPublicEDKey|SPUStandardUpdaterController' \
@@ -74,10 +75,19 @@ check "grep -q 'ScheduleAccessibilityRetry' '$agent' && grep -q 'MIN(delay \* 2.
 # Runtime footprint and binary linkage.
 check "grep -q 'SANGKEY_AGENT_CI_SMOKE' '$agent' && grep -q 'dictionaries=yes; AppKit=no' '$agent' && grep -q '30720' '$ci'" \
       "CI continuously gates headless runtime footprint"
-check "grep -q 'lipo \"\\$AGENT\" -verify_arch arm64 x86_64' '$ci' && grep -q 'lipo \"\\$AGENT\" -verify_arch arm64 x86_64' '$release'" \
-      "CI and release require a universal agent"
-check "grep -q \"otool -L \\\"\\$AGENT\\\"\" '$ci' && grep -qE \"grep -Eqi 'AppKit\\|SwiftUI\\|Combine\\|/libswift\\|ServiceManagement'\" '$ci' && grep -qE \"grep -Eqi 'AppKit\\|SwiftUI\\|Combine\\|/libswift\\|ServiceManagement'\" '$release'" \
-      "dynamic linkage gates forbid heavy runtime frameworks in agent"
+if grep -Fq 'lipo "$AGENT" -verify_arch arm64 x86_64' "$ci" && \
+   grep -Fq 'lipo "$AGENT" -verify_arch arm64 x86_64' "$release"; then
+  ok "CI and release require a universal agent"
+else
+  bad "CI and release require a universal agent"
+fi
+if grep -Fq 'otool -L "$AGENT"' "$ci" && \
+   grep -Fq "grep -Eqi 'AppKit|SwiftUI|Combine|/libswift|ServiceManagement'" "$ci" && \
+   grep -Fq "grep -Eqi 'AppKit|SwiftUI|Combine|/libswift|ServiceManagement'" "$release"; then
+  ok "dynamic linkage gates forbid heavy runtime frameworks in agent"
+else
+  bad "dynamic linkage gates forbid heavy runtime frameworks in agent"
+fi
 
 # Signing and release supply chain.
 check "grep -q 'AGENT_IDENTIFIER=\"com.sangtrx.sangkey.agent\"' '$package' && grep -q 'ACTUAL_AGENT_IDENTIFIER' '$package'" \
@@ -108,6 +118,17 @@ check "grep -q 'cp \"\\$ROOT/LICENSE\" \"\\$DIST/LICENSE.txt\"' '$package' && gr
       "DMG carries license, notice and exact corresponding-source pointer"
 check "grep -q '/usr/bin/base64 -D' '$release' && grep -q 'Smoke-test release credential decoder' '$ci'" \
       "macOS-native credential decoder is smoke tested"
+
+# English data provenance and generator surface.
+if ! grep -Eqi 'english_words\.dat|google-10000|first20hours|add_argument\("--english"' "$gen_dict" && \
+   grep -q 'english_common_cc0.json' "$gen_dict" && \
+   grep -q 'english_nouns_cc0.json' "$gen_dict" && \
+   grep -q 'english_supplement.dat' "$gen_dict" && \
+   grep -q 'TOKEN_RE = re.compile(rb"\[A-Za-z\]+")' "$gen_dict"; then
+  ok "dictionary generator cannot recreate the removed legacy English payload"
+else
+  bad "dictionary generator can reintroduce stale English data or tokenization drift"
+fi
 
 # Legacy engine provenance/safety.
 check "grep -Fq '#define CHR(index) (((index) >= 0 && (index) < MAX_BUFF)' core/engine/DataType.h" \
