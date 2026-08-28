@@ -5,8 +5,9 @@ struct Key84App: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var app = AppController.shared
-    // Starts Sparkle's updater at launch so scheduled background checks run; also
-    // backs the menu's "Kiểm tra cập nhật…" item.
+    // Manual updater: the menu item opens this fork's Releases page in the
+    // user's browser. No background updater, appcast, or installer helper runs
+    // inside the Accessibility-enabled keyboard process.
     @StateObject private var updater = UpdaterController.shared
 
     var body: some Scene {
