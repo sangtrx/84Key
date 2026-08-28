@@ -20,7 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shared explicit `com.sangtrx.sangkey` CFPreferences domain with Darwin
   notification propagation between control app and agent.
 - Production footprint gate for the real embedded agent; current CI measurements
-  keep idle RSS well below the 30 MiB budget while both dictionaries are loaded.
+  keep idle RSS well below the 30 MiB budget while the production English detector
+  corpora and Vietnamese dictionary are loaded.
 - Universal `arm64 + x86_64` launcher and agent verification.
 
 ### Changed
@@ -31,11 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of waking once per second indefinitely while approval is pending.
 - Background-agent status is refreshed whenever the control menu opens or the app
   becomes active, so System Settings approval/revocation is reflected immediately.
-- English auto-detection now uses a byte-pinned CC0 common-word corpus from
-  `dariusk/corpora` plus a separate, sorted SangKey-maintained CC0 supplement.
-  The historical `google-10000-english`-derived payload is removed from the
+- English auto-detection now uses two byte-pinned CC0 Corpora datasets
+  (`common.json` + `nouns.json`) plus a separate, sorted SangKey-maintained CC0
+  supplement. The historical English detector payload is removed from the
   product and repository because its redistribution provenance was not clear
   enough for a public SangKey release.
+- `tools/gen_dict.py` now generates only the Vietnamese Telex dictionary and reads
+  the production English detector sources solely for collision avoidance; it can
+  no longer recreate the removed English payload.
 
 ### Security
 
@@ -49,8 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - DMGs include `LICENSE.txt`, `NOTICE.txt`, `THIRD_PARTY_DATA.txt`, and `SOURCE.txt`
   pointing to reviewed licensing/provenance and the exact corresponding source
   commit.
-- CI verifies the vendored CC0 corpus by exact Git blob SHA and refuses to track
-  the removed legacy English payload again.
+- CI verifies both vendored CC0 corpora by exact Git blob SHA and refuses to track
+  or regenerate the removed legacy English payload again.
 
 ## [0.3.0] - 2026-08-28
 
