@@ -3,11 +3,15 @@
 
 #import "SangKeyPreferences.h"
 
-static NSString * const kRepoReleases = @"https://github.com/sangtrx/SangKey/releases/latest";
+// Keep the live repository URL until GitHub rename is actually completed. GitHub
+// preserves redirects after a repository rename, so this remains valid before and
+// after the planned 84Key -> SangKey repository rename.
+static NSString * const kRepoReleases = @"https://github.com/sangtrx/84Key/releases/latest";
+// Planned canonical post-rename path: https://github.com/sangtrx/SangKey/releases/latest
 static NSString * const kAgentPlist = @"com.sangtrx.sangkey.agent.plist";
 static NSString * const kAgentDesiredEnabled = @"agentDesiredEnabled";
 
-@interface SangKeyAppDelegate : NSObject <NSApplicationDelegate>
+@interface SangKeyAppDelegate : NSObject <NSApplicationDelegate, NSMenuDelegate>
 - (void)rebuildMenu;
 @end
 
@@ -48,6 +52,7 @@ static void LauncherPreferencesChanged(CFNotificationCenterRef center,
 
     _statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
     _menu = [NSMenu new];
+    _menu.delegate = self;
     _statusItem.menu = _menu;
     [self rebuildMenu];
 
@@ -64,6 +69,18 @@ static void LauncherPreferencesChanged(CFNotificationCenterRef center,
                                        (__bridge const void *)self,
                                        SangKeyPreferencesChangedDarwinNotification,
                                        NULL);
+}
+
+- (void)applicationDidBecomeActive:(NSNotification *)notification {
+    (void)notification;
+    [self rebuildMenu];
+}
+
+- (void)menuWillOpen:(NSMenu *)menu {
+    // SMAppService.status can change outside the process when the user approves or
+    // revokes the background item in System Settings. Refresh immediately before
+    // display so the control menu never shows stale lifecycle state.
+    if (menu == _menu) [self rebuildMenu];
 }
 
 - (void)ensureAgentRegistrationMatchesIntent {

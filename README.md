@@ -17,8 +17,9 @@ keystrokes 24/7 stays as small as practical:
   `SMAppService` API.
 - **No embedded auto-updater.** Update checks only open GitHub Releases in the browser.
 - **Universal release** (`arm64` + `x86_64`) for macOS 14+.
-- **Hardened release chain** with exact-main provenance, ASan/UBSan gates,
-  immutable action pins, Developer ID signing and Apple notarization.
+- **Hardened release chain** with exact-main provenance, protected Git refs,
+  ASan/UBSan gates, immutable action pins, Developer ID signing, Team ID checks,
+  Apple notarization and Gatekeeper assessment.
 
 ## Architecture
 
@@ -44,11 +45,12 @@ SwiftUI, Combine or the Swift runtime.
 
 ## Footprint
 
-The v0.4 CI gate runs the **actual embedded SangKeyAgent** with both English and
-Vietnamese dictionaries loaded, while skipping only the TCC-dependent event tap.
-Its idle RSS must stay below **30 MiB**. The architecture was selected after
-measurement showed the previous AppKit-resident process dominated idle memory;
-rewriting the dictionaries would have saved very little by comparison.
+The v0.4 CI gate runs the **actual embedded SangKeyAgent** with the production
+English detector corpora and Vietnamese dictionary loaded, while skipping only
+the TCC-dependent event tap. Its idle RSS must stay below **30 MiB**. The
+architecture was selected after measurement showed the previous AppKit-resident
+process dominated idle memory; rewriting the dictionaries would have saved very
+little by comparison.
 
 ## Privacy
 
@@ -87,20 +89,31 @@ not silently re-enable it.
 
 ## Install
 
-Releases are published at:
+Until the planned GitHub repository rename is completed, the live release URL is:
 
-<https://github.com/sangtrx/SangKey/releases>
+<https://github.com/sangtrx/84Key/releases>
+
+GitHub keeps redirects when a repository is renamed, so this URL remains a safe
+entry point after the repository becomes `sangtrx/SangKey`.
 
 A release contains:
 
 - `SangKey-vX.Y.Z.dmg`
 - `SHA256SUMS`
 
+The DMG itself also contains:
+
+- `LICENSE.txt`
+- `NOTICE.txt`
+- `THIRD_PARTY_DATA.txt` with byte-pinned English detector provenance
+- `SOURCE.txt` pointing to the exact corresponding-source commit.
+
 Verify before installation:
 
 ```sh
 shasum -a 256 -c SHA256SUMS
 xcrun stapler validate SangKey-vX.Y.Z.dmg
+spctl -a -t open --context context:primary-signature SangKey-vX.Y.Z.dmg
 ```
 
 Then:
@@ -119,7 +132,7 @@ Avoid running another event-based Vietnamese input utility at the same time.
 Requirements:
 
 - macOS 14+
-- Xcode 26.x
+- **Xcode 26.6 (build 17F113)** for release-reproducible builds
 - XcodeGen 2.46.0
 
 Run the engine/sanitizer/security suite:
@@ -156,7 +169,7 @@ SANGKEY_ARCHS="arm64 x86_64" bash tools/package.sh
 ## Project layout
 
 - `core/engine/` — OpenKey-derived C++ typing engine.
-- `core/data/` — English/Vietnamese detection dictionaries.
+- `core/data/` — byte-pinned CC0 English detector data, SangKey supplement, and the Vietnamese Telex dictionary.
 - `core/tests/` — engine, typing simulation, ASan/UBSan and parser tests.
 - `platform/macos/Agent/` — always-on headless `SangKeyAgent` + bundled LaunchAgent descriptor.
 - `platform/macos/App/SangKeyApp.mm` — ephemeral AppKit/ServiceManagement control menu.
@@ -173,7 +186,12 @@ SangKey is an independently branded macOS distribution derived from:
 
 - [`nghialuong/84Key`](https://github.com/nghialuong/84Key)
 - [`tuyenvm/OpenKey`](https://github.com/tuyenvm/OpenKey)
-- [`google-10000-english`](https://github.com/first20hours/google-10000-english)
+
+Automatic English detection uses byte-pinned CC0 data from
+[`dariusk/corpora`](https://github.com/dariusk/corpora) plus a small
+SangKey-maintained CC0 supplement. The historical `google-10000-english` payload
+is not tracked or distributed by SangKey v0.4; see
+[`core/data/ENGLISH_WORDS_PROVENANCE.md`](core/data/ENGLISH_WORDS_PROVENANCE.md).
 
 Upstream attribution is preserved in source files and [`NOTICE`](NOTICE). Because
 the typing engine derives from GPLv3-licensed OpenKey, SangKey is distributed

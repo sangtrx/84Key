@@ -20,7 +20,10 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Validate tag, main provenance, and source version
+      - name: Validate tag, main provenance, source version, and protected refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REF_PROTECTED_VALUE: ${{ github.ref_protected }}
         run: |
           set -euo pipefail
           [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
@@ -37,6 +40,16 @@ jobs:
           SOURCE_VERSION="$(awk -F'"' '/MARKETING_VERSION:/ { print $2; exit }' platform/macos/project.yml)"
           test "v$SOURCE_VERSION" = "$GITHUB_REF_NAME"
 
+          test "$GITHUB_REF_PROTECTED_VALUE" = "true" || {
+            echo "ERROR: release tag is not protected by a GitHub ruleset" >&2
+            exit 1
+          }
+          MAIN_PROTECTED="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.protected')"
+          test "$MAIN_PROTECTED" = "true" || {
+            echo "ERROR: main is not protected; configure a branch ruleset before releasing" >&2
+            exit 1
+          }
+
       - name: Run core and security release gate
         run: bash core/tests/run_tests.sh
 
@@ -45,6 +58,7 @@ jobs:
     needs: preflight
     runs-on: macos-26
     timeout-minutes: 45
+    # First protected-environment approval authorizes use of Apple credentials.
     environment: release
     permissions:
       contents: read
@@ -58,12 +72,16 @@ jobs:
       - name: Verify exact tag checkout
         run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 
-      - name: Select Xcode 26
+      - name: Select exact Xcode 26.6 (17F113)
         run: |
           set -euo pipefail
-          XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
-          [ -n "$XCODE" ] || { echo "ERROR: no Xcode 26.x found" >&2; exit 1; }
+          XCODE=/Applications/Xcode_26.6.app
+          test -d "$XCODE" || { echo "ERROR: exact Xcode 26.6 is unavailable" >&2; exit 1; }
           sudo xcode-select -s "$XCODE/Contents/Developer"
+          XCODE_VERSION="$(xcodebuild -version | sed -n '1p')"
+          XCODE_BUILD="$(xcodebuild -version | sed -n '2p')"
+          test "$XCODE_VERSION" = "Xcode 26.6"
+          test "$XCODE_BUILD" = "Build version 17F113"
           xcodebuild -version
 
       - name: Install verified XcodeGen 2.46.0
@@ -113,7 +131,10 @@ jobs:
         env:
           SANGKEY_ASC_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           SANGKEY_ASC_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+          SANGKEY_EXPECTED_TEAM_ID: ${{ secrets.DEVELOPER_ID_TEAM_ID }}
+          SANGKEY_REQUIRE_DEVELOPER_ID: '1'
           SANGKEY_ARCHS: 'arm64 x86_64'
+          SANGKEY_SOURCE_URL: 'https://github.com/${{ github.repository }}/tree/${{ github.sha }}'
         run: |
           set -euo pipefail
           export SANGKEY_ASC_KEY_PATH="$RUNNER_TEMP/asc.p8"
@@ -123,8 +144,17 @@ jobs:
           BIN="$APP/Contents/MacOS/SangKey"
           AGENT="$APP/Contents/Resources/SangKeyAgent"
           AGENT_PLIST="$APP/Contents/Library/LaunchAgents/com.sangtrx.sangkey.agent.plist"
+          COMMON="$APP/Contents/Resources/english_common_cc0.json"
+          NOUNS="$APP/Contents/Resources/english_nouns_cc0.json"
+          SUPPLEMENT="$APP/Contents/Resources/english_supplement.dat"
           test -x "$AGENT"
           test -f "$AGENT_PLIST"
+          test -f "$COMMON"
+          test -f "$NOUNS"
+          test -f "$SUPPLEMENT"
+          test ! -e "$APP/Contents/Resources/english_words.dat"
+          test "$(git hash-object "$COMMON")" = '8ec4ea53704dfca63f1ee00852c6bcc15411c49e'
+          test "$(git hash-object "$NOUNS")" = 'aca4efb20de9becfd3f949c73e97297be26574f4'
           plutil -lint "$AGENT_PLIST"
           test "$(/usr/libexec/PlistBuddy -c 'Print :BundleProgram' "$AGENT_PLIST")" = 'Contents/Resources/SangKeyAgent'
           lipo "$BIN" -verify_arch arm64 x86_64
@@ -135,11 +165,39 @@ jobs:
           fi
           codesign --verify --strict --verbose=2 "$AGENT"
           test "$(codesign -d --verbose=4 "$AGENT" 2>&1 | awk -F= '/^Identifier=/{print $2; exit}')" = 'com.sangtrx.sangkey.agent'
+          test "$(codesign -d --verbose=4 "$AGENT" 2>&1 | awk -F= '/^TeamIdentifier=/{print $2; exit}')" = "$SANGKEY_EXPECTED_TEAM_ID"
+          test "$(codesign -d --verbose=4 "$APP" 2>&1 | awk -F= '/^TeamIdentifier=/{print $2; exit}')" = "$SANGKEY_EXPECTED_TEAM_ID"
           codesign --verify --deep --strict --verbose=2 "$APP"
           DMG="SangKey-${GITHUB_REF_NAME}.dmg"
           mv build/SangKey.dmg "build/$DMG"
           test ! -e "$APP/Contents/Frameworks/Sparkle.framework"
           test ! -e "$APP/Contents/Resources/EngineUpstream.inc"
+
+          MOUNT="$RUNNER_TEMP/sangkey-release-mount"
+          mkdir -p "$MOUNT"
+          hdiutil attach "build/$DMG" -nobrowse -readonly -mountpoint "$MOUNT" >/dev/null
+          trap 'hdiutil detach "$MOUNT" >/dev/null 2>&1 || true' EXIT
+          MOUNT_APP="$MOUNT/SangKey.app"
+          test -d "$MOUNT_APP"
+          test -f "$MOUNT/LICENSE.txt"
+          test -f "$MOUNT/NOTICE.txt"
+          test -f "$MOUNT/THIRD_PARTY_DATA.txt"
+          test -f "$MOUNT/SOURCE.txt"
+          grep -q '8ec4ea53704dfca63f1ee00852c6bcc15411c49e' "$MOUNT/THIRD_PARTY_DATA.txt"
+          grep -q 'aca4efb20de9becfd3f949c73e97297be26574f4' "$MOUNT/THIRD_PARTY_DATA.txt"
+          grep -Fxq "$SANGKEY_SOURCE_URL" "$MOUNT/SOURCE.txt"
+          test -f "$MOUNT_APP/Contents/Resources/english_common_cc0.json"
+          test -f "$MOUNT_APP/Contents/Resources/english_nouns_cc0.json"
+          test -f "$MOUNT_APP/Contents/Resources/english_supplement.dat"
+          test ! -e "$MOUNT_APP/Contents/Resources/english_words.dat"
+          test "$(git hash-object "$MOUNT_APP/Contents/Resources/english_common_cc0.json")" = '8ec4ea53704dfca63f1ee00852c6bcc15411c49e'
+          test "$(git hash-object "$MOUNT_APP/Contents/Resources/english_nouns_cc0.json")" = 'aca4efb20de9becfd3f949c73e97297be26574f4'
+          codesign --verify --deep --strict --verbose=2 "$MOUNT_APP"
+          spctl -a -vv --type execute "$MOUNT_APP"
+          hdiutil detach "$MOUNT" >/dev/null
+          trap - EXIT
+
+          spctl -a -t open --context context:primary-signature "build/$DMG"
           (
             cd build
             shasum -a 256 "$DMG" > SHA256SUMS
@@ -166,6 +224,11 @@ jobs:
     name: Publish GitHub Release
     needs: build-sign-notarize
     runs-on: ubuntu-24.04
+    # Second approval on the same protected environment is intentional: after
+    # build-sign-notarize uploads the notarized artifact, test that exact DMG on
+    # a clean Mac (SMAppService, Accessibility, close/relogin, disable/enable)
+    # before approving this public-publish job.
+    environment: release
     permissions:
       contents: write
     steps:

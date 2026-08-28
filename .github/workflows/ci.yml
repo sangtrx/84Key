@@ -30,12 +30,16 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Select Xcode 26
+      - name: Select exact Xcode 26.6 (17F113)
         run: |
           set -euo pipefail
-          XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
-          [ -n "$XCODE" ] || { echo "ERROR: no Xcode 26.x found on runner" >&2; exit 1; }
+          XCODE=/Applications/Xcode_26.6.app
+          test -d "$XCODE" || { echo "ERROR: exact Xcode 26.6 is unavailable" >&2; exit 1; }
           sudo xcode-select -s "$XCODE/Contents/Developer"
+          XCODE_VERSION="$(xcodebuild -version | sed -n '1p')"
+          XCODE_BUILD="$(xcodebuild -version | sed -n '2p')"
+          test "$XCODE_VERSION" = "Xcode 26.6"
+          test "$XCODE_BUILD" = "Build version 17F113"
           xcodebuild -version
 
       - name: Smoke-test release credential decoder
@@ -84,10 +88,19 @@ jobs:
           LAUNCHER_REAL="$APP/Contents/MacOS/SangKey (DEV).debug.dylib"
           AGENT="$APP/Contents/Resources/SangKeyAgent"
           AGENT_PLIST="$APP/Contents/Library/LaunchAgents/com.sangtrx.sangkey.agent.plist"
+          COMMON="$APP/Contents/Resources/english_common_cc0.json"
+          NOUNS="$APP/Contents/Resources/english_nouns_cc0.json"
+          SUPPLEMENT="$APP/Contents/Resources/english_supplement.dat"
           test -x "$LAUNCHER_ENTRY"
           test -f "$LAUNCHER_REAL"
           test -x "$AGENT"
           test -f "$AGENT_PLIST"
+          test -f "$COMMON"
+          test -f "$NOUNS"
+          test -f "$SUPPLEMENT"
+          test ! -e "$APP/Contents/Resources/english_words.dat"
+          test "$(git hash-object "$COMMON")" = '8ec4ea53704dfca63f1ee00852c6bcc15411c49e'
+          test "$(git hash-object "$NOUNS")" = 'aca4efb20de9becfd3f949c73e97297be26574f4'
           plutil -lint "$AGENT_PLIST"
           test "$(/usr/libexec/PlistBuddy -c 'Print :BundleProgram' "$AGENT_PLIST")" = 'Contents/Resources/SangKeyAgent'
 
@@ -144,6 +157,7 @@ jobs:
           CODESIGN_IDENTITY: '-'
           SANGKEY_VERSION: '0.4.0'
           SANGKEY_ARCHS: 'arm64 x86_64'
+          SANGKEY_SOURCE_URL: 'https://github.com/sangtrx/84Key/tree/${{ github.sha }}'
           CONFIG: Release
         run: |
           set -euo pipefail
@@ -159,6 +173,19 @@ jobs:
           test -x "$AGENT"
           test -f "$AGENT_PLIST"
           test -f "$DMG"
+          test -f build/dist/LICENSE.txt
+          test -f build/dist/NOTICE.txt
+          test -f build/dist/THIRD_PARTY_DATA.txt
+          test -f build/dist/SOURCE.txt
+          grep -Fxq "$SANGKEY_SOURCE_URL" build/dist/SOURCE.txt
+          grep -q '8ec4ea53704dfca63f1ee00852c6bcc15411c49e' build/dist/THIRD_PARTY_DATA.txt
+          grep -q 'aca4efb20de9becfd3f949c73e97297be26574f4' build/dist/THIRD_PARTY_DATA.txt
+          test -f "$APP/Contents/Resources/english_common_cc0.json"
+          test -f "$APP/Contents/Resources/english_nouns_cc0.json"
+          test -f "$APP/Contents/Resources/english_supplement.dat"
+          test ! -e "$APP/Contents/Resources/english_words.dat"
+          test "$(git hash-object "$APP/Contents/Resources/english_common_cc0.json")" = '8ec4ea53704dfca63f1ee00852c6bcc15411c49e'
+          test "$(git hash-object "$APP/Contents/Resources/english_nouns_cc0.json")" = 'aca4efb20de9becfd3f949c73e97297be26574f4'
           test ! -e "$APP/Contents/Frameworks/Sparkle.framework"
           test ! -e "$APP/Contents/Resources/EngineUpstream.inc"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" = "com.sangtrx.sangkey"

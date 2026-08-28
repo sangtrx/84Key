@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-28
+
+### Added
+
+- Split-process macOS architecture: an ephemeral AppKit + ServiceManagement
+  control app manages a headless `SangKeyAgent` that owns the event tap, typing
+  engine and dictionaries.
+- Bundled `SMAppService` LaunchAgent registration using
+  `Contents/Library/LaunchAgents` + `BundleProgram`, without writing user/system
+  LaunchAgent files or shelling out to `launchctl`.
+- Shared explicit `com.sangtrx.sangkey` CFPreferences domain with Darwin
+  notification propagation between control app and agent.
+- Production footprint gate for the real embedded agent; current CI measurements
+  keep idle RSS well below the 30 MiB budget while the production English detector
+  corpora and Vietnamese dictionary are loaded.
+- Universal `arm64 + x86_64` launcher and agent verification.
+
+### Changed
+
+- Always-on runtime no longer links AppKit, ServiceManagement, Swift, SwiftUI or
+  Combine. AppKit is resident only while the user opens the control surface.
+- Accessibility retry now uses exponential backoff capped at 15 seconds instead
+  of waking once per second indefinitely while approval is pending.
+- Background-agent status is refreshed whenever the control menu opens or the app
+  becomes active, so System Settings approval/revocation is reflected immediately.
+- English auto-detection now uses two byte-pinned CC0 Corpora datasets
+  (`common.json` + `nouns.json`) plus a separate, sorted SangKey-maintained CC0
+  supplement. The historical English detector payload is removed from the
+  product and repository because its redistribution provenance was not clear
+  enough for a public SangKey release.
+- `tools/gen_dict.py` now generates only the Vietnamese Telex dictionary and reads
+  the production English detector sources solely for collision avoidance; it can
+  no longer recreate the removed English payload.
+
+### Security
+
+- Release builds now require a Developer ID Application identity and verify the
+  expected Apple Team Identifier for both the nested agent and enclosing app.
+- Release preflight refuses unprotected `main` or unprotected release tags before
+  Apple signing credentials are exposed.
+- macOS CI/release toolchain is pinned to Xcode 26.6 build 17F113.
+- Notarized release payloads must pass both `stapler` and Gatekeeper `spctl`
+  assessment before publication.
+- DMGs include `LICENSE.txt`, `NOTICE.txt`, `THIRD_PARTY_DATA.txt`, and `SOURCE.txt`
+  pointing to reviewed licensing/provenance and the exact corresponding source
+  commit.
+- CI verifies both vendored CC0 corpora by exact Git blob SHA and refuses to track
+  or regenerate the removed legacy English payload again.
+
+## [0.3.0] - 2026-08-28
+
+### Changed
+
+- Rebranded the hardened macOS distribution to **SangKey** with independent bundle
+  identifiers under `com.sangtrx.sangkey`.
+- Replaced the SwiftUI/Combine resident menu application with a zero-Swift native
+  Objective-C++/AppKit control surface.
+- Reduced global event-tap subscriptions to the events needed by the input path
+  and added Mach-O linkage/footprint gates so heavy UI frameworks cannot silently
+  return to the always-on runtime.
+
 ## [0.2.0] - 2026-08-28
 
 ### Added
@@ -172,13 +233,16 @@ First macOS release.
 - First-run Accessibility onboarding and a warning about conflicts with other
   Vietnamese input methods.
 - Vietnamese-by-Telex syllable dictionary generated from linguistic rules (no
-  external word list); English word list from the public-domain
-  google-10000-english set.
+  external word list); the original 84Key-lineage English detector payload was
+  later replaced before SangKey v0.4.0 because its redistribution provenance was
+  not sufficiently clear for this public distribution.
 - **Privacy**: 100% local processing, no telemetry, no network calls for typing.
 - C++ engine test harness, a keystroke-level simulation of the macOS output
   pipeline with drop-in `cases/*.txt` article fixtures, a live end-to-end script,
   and continuous integration.
 
-[Unreleased]: https://github.com/sangtrx/84Key/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/sangtrx/84Key/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/sangtrx/84Key/releases/tag/v0.4.0
+[0.3.0]: https://github.com/sangtrx/84Key/releases/tag/v0.3.0
 [0.2.0]: https://github.com/sangtrx/84Key/releases/tag/v0.2.0
 [0.1.0]: https://github.com/nghialuong/84Key/releases/tag/v0.1.0

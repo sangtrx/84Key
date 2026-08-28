@@ -48,7 +48,11 @@ targets:
     sources:
       - path: App/SangKeyApp.mm
       - path: Shared/SangKeyPreferences.mm
-      - path: ../../core/data/english_words.dat
+      - path: ../../core/data/english_common_cc0.json
+        buildPhase: resources
+      - path: ../../core/data/english_nouns_cc0.json
+        buildPhase: resources
+      - path: ../../core/data/english_supplement.dat
         buildPhase: resources
       - path: ../../core/data/viet_telex.dat
         buildPhase: resources

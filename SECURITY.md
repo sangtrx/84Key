@@ -14,7 +14,10 @@ Security fixes are provided for the latest SangKey release line.
 ## Reporting a vulnerability
 
 Please report security issues privately through GitHub Security Advisories:
-<https://github.com/sangtrx/SangKey/security/advisories/new>
+<https://github.com/sangtrx/84Key/security/advisories/new>
+
+The repository is planned to be renamed to `sangtrx/SangKey`; GitHub preserves
+redirects from the current URL after a rename.
 
 Include reproduction steps, affected version/commit, and macOS version.
 
@@ -42,7 +45,7 @@ Runtime constraints:
 - Launcher and agent share only an explicit `com.sangtrx.sangkey` CFPreferences
   domain plus a Darwin notification. There is no XPC service or local database.
 - There is **no embedded updater** or background network client. The update menu
-  item only opens the SangKey GitHub Releases page after an explicit click.
+  item only opens the live GitHub Releases page after an explicit click.
 - There is no clipboard client, keychain client, telemetry, analytics SDK or
   typing-data upload path in the always-on process.
 - The inherited `KEY84_TRACE` path is scrubbed before input interception begins.
@@ -50,6 +53,8 @@ Runtime constraints:
   SangKey does not claim to implement its own password-field detector.
 - Serialized legacy parsers fail closed on malformed/truncated input and are
   covered by ASan/UBSan.
+- Accessibility approval retry uses exponential backoff capped at 15 seconds,
+  avoiding a permanent one-second wakeup loop while approval is pending.
 
 ## Code identity and TCC
 
@@ -62,8 +67,12 @@ The application identities are intentionally independent from upstream 84Key:
 The agent is a command-line Mach-O rather than an application bundle, so release
 packaging pins its **code-signing identifier explicitly** to
 `com.sangtrx.sangkey.agent` before signing the enclosing app. CI and release read
-that identifier back from the signature and fail if it drifts. This keeps the
-agent's designated requirement / permission identity deterministic across builds.
+that identifier back from the signature and fail if it drifts.
+
+A public release additionally requires a **Developer ID Application** signer and
+compares the `TeamIdentifier` of both agent and app against the protected
+`DEVELOPER_ID_TEAM_ID` release secret. A notarization credential alone is not
+accepted as proof of the expected signer identity.
 
 ## Lightweight-runtime gate
 
@@ -73,24 +82,34 @@ CI inspects both final Mach-O binaries using `otool -L`:
 - the always-on agent fails if it links AppKit, ServiceManagement, SwiftUI,
   Combine or the Swift runtime.
 
-The CI smoke runs the actual embedded agent with both production dictionaries
-loaded while skipping only the TCC-dependent event tap. Idle RSS must remain
-below **30 MiB**, and CPU is reported for every macOS build.
+The CI smoke runs the actual embedded agent with the production English detector
+corpora, SangKey supplement, and Vietnamese dictionary loaded while skipping only
+the TCC-dependent event tap. Idle RSS must remain below **30 MiB**, and CPU is
+reported for every macOS build.
 
 ## Distribution hardening
 
-The release workflow separates privileges:
+The release workflow separates privileges and fails closed:
 
 - secret-free preflight requires strict semver on the exact current `main`, checks
-  source version, and reruns the complete core/security suite;
+  source version, reruns the complete core/security suite, requires `main` to be
+  protected and requires the release tag itself to be a protected ref;
 - build/sign/notarize has repository read-only permission plus protected Apple
   signing/notarization secrets;
+- CI and release are pinned to **Xcode 26.6 build 17F113** and XcodeGen 2.46.0 is
+  SHA-256 verified before execution;
 - the nested `SangKeyAgent` is signed first with its explicit identifier and
   Hardened Runtime, then the enclosing app is signed and deep-verified;
+- Developer ID authority and expected Apple Team ID are verified before packaging;
 - publish has `contents: write` but no Apple secrets;
 - reusable GitHub Actions are pinned to immutable commit SHAs;
-- XcodeGen 2.46.0 is SHA-256 verified before execution;
 - signing material is destroyed before artifact handoff;
+- notarized artifacts must pass `stapler` validation and Gatekeeper `spctl`
+  assessment before publication;
+- each DMG carries `LICENSE.txt`, `NOTICE.txt`, `THIRD_PARTY_DATA.txt`, and
+  `SOURCE.txt` pointing to the exact corresponding-source commit;
+- release CI verifies the byte-pinned English detector corpus hashes in both the
+  built app and the mounted DMG before publication;
 - each release publishes a notarized universal (`arm64` + `x86_64`) launcher and
   agent inside the DMG together with `SHA256SUMS`.
 

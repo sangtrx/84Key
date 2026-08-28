@@ -1,46 +1,61 @@
-84Key hardened fork
-Copyright (c) 2026 The 84Key Authors and contributors
+SangKey macOS distribution
+Copyright (c) 2026 SangKey contributors
 
 This software is licensed under the GNU General Public License version 3
 (GPLv3). See the LICENSE file for the full license text.
 
-
 Derived work
 ------------
 
-84Key's Vietnamese typing engine is derived from OpenKey
+SangKey is derived from the 84Key macOS project
+(https://github.com/nghialuong/84Key) and preserves its copyright and GPLv3
+obligations.
+
+The Vietnamese typing engine is derived from OpenKey
 (https://github.com/tuyenvm/OpenKey), Copyright (c) Mai Vũ Tuyên,
-licensed under GPLv3. Because the engine is GPLv3, 84Key as a whole is
-also distributed under GPLv3. We gratefully acknowledge the OpenKey
-project for the core typing logic that makes accurate Vietnamese input
-possible.
-
-This hardened fork is derived from nghialuong/84Key
-(https://github.com/nghialuong/84Key). Existing copyright and GPLv3
-obligations from that project are preserved.
-
+licensed under GPLv3. Because the engine is GPLv3, SangKey as a whole is also
+distributed under GPLv3. We gratefully acknowledge the OpenKey project for the
+core typing logic that makes accurate Vietnamese input possible.
 
 Third-party data
 ----------------
 
-1. English word list
-   Source: google-10000-english
-   (https://github.com/first20hours/google-10000-english)
-   License: Public domain / MIT.
-   Used to power 84Key's automatic English-word detection.
+1. English detector corpora
+   Source: Darius Kazemi Corpora
+   https://github.com/dariusk/corpora
+   Pinned upstream commit: cf30ca27ab176b63623af1ddcfa2447ac07305ba
+
+   - data/words/common.json
+     Git blob: 8ec4ea53704dfca63f1ee00852c6bcc15411c49e
+   - data/words/nouns.json
+     Git blob: aca4efb20de9becfd3f949c73e97297be26574f4
+
+   License: Creative Commons CC0 1.0 Universal.
+   These byte-pinned files form the auditable external-data base for automatic
+   English detection.
+
+   The small SangKey-maintained English detector supplement is kept separately
+   in core/data/english_supplement.dat and is dedicated to CC0 1.0 by SangKey
+   contributors to the extent they hold copyright or related database rights.
+   See core/data/ENGLISH_WORDS_PROVENANCE.md for exact provenance.
 
 2. Vietnamese syllable dictionary
-   The Vietnamese-by-Telex syllable dictionary is generated from
-   linguistic rules by this project. It is not derived from, and does
-   not incorporate, any external or scraped word list.
-
+   The Vietnamese-by-Telex syllable dictionary is generated from linguistic
+   rules by this project. It is not derived from, and does not incorporate, any
+   external or scraped word list.
 
 Distribution note
 -----------------
 
-The hardened fork does not embed Sparkle or another in-app updater. The
-menu update command opens the fork's GitHub Releases page only after an
-explicit user action. Release-build tooling such as XcodeGen is not
-linked into the application and is covered by its own upstream license.
+SangKey does not embed Sparkle or another in-app updater. The menu update command
+opens the project's GitHub Releases page only after an explicit user action.
+Release-build tooling such as XcodeGen is not linked into the application and is
+covered by its own upstream license.
 
-All fork changes are distributed under GPLv3.
+Public DMGs include LICENSE.txt, NOTICE.txt, THIRD_PARTY_DATA.txt and SOURCE.txt.
+SOURCE.txt identifies the exact corresponding-source commit for that binary
+distribution. THIRD_PARTY_DATA.txt records the reviewed English detector data
+provenance.
+
+All SangKey code changes are distributed under GPLv3 unless a file explicitly
+states a different compatible data/content dedication.
