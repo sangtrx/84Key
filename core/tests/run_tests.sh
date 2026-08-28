@@ -36,6 +36,11 @@ if git ls-files --error-unmatch "$LEGACY_FIXTURE" >/dev/null 2>&1; then
   exit 1
 fi
 
+# Execute the maintained generator without mutating tracked data. This catches
+# Python/import/source-path drift while keeping viet_telex.dat changes explicit
+# and reviewable rather than silently rewriting the corpus during CI.
+python3 ../../tools/gen_dict.py --dry-run
+
 cat "$COMMON" "$NOUNS" "$SUPPLEMENT" > "$PRODUCTION_DICT"
 
 # The old google-10000 dictionary happened to create enough accidental English
