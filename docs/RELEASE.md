@@ -138,7 +138,7 @@ After mounting the DMG, you can additionally verify the application:
 ```sh
 codesign --verify --deep --strict --verbose=2 /Volumes/84Key/84Key.app
 codesign -dv --verbose=4 /Volumes/84Key/84Key.app
-lipo -archs /Volumes/84Key/84Key.app/Contents/MacOS/84Key
+lipo /Volumes/84Key/84Key.app/Contents/MacOS/84Key -archs
 ```
 
 Confirm the bundle identifier is `com.sangtrx.key84`, the executable contains
