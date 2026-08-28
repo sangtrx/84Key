@@ -20,12 +20,12 @@ jobs:
           persist-credentials: false
       - name: Compiler version
         run: c++ --version
-      - name: Build and run engine, parser sanitizers, and source invariants
+      - name: Build and run engine, sanitizer, and source-invariant gates
         run: bash core/tests/run_tests.sh
 
   macos-app:
     name: Build macOS app
-    runs-on: macos-latest
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -77,17 +77,21 @@ jobs:
       # Exercise the exact release packaging path without exposing Apple release
       # credentials. '-' is codesign's ad-hoc identity: it executes the same
       # signing/verification and DMG creation code, but cannot masquerade as a
-      # distributable Developer ID build.
-      - name: Smoke-test Release DMG packaging
+      # distributable Developer ID build. Release artifacts are required to be
+      # universal so the documented macOS 14+ support does not silently exclude
+      # Intel Macs just because GitHub's macOS 26 runner is arm64.
+      - name: Smoke-test universal Release DMG packaging
         env:
           CODESIGN_IDENTITY: '-'
           KEY84_VERSION: '0.2.0'
+          KEY84_ARCHS: 'arm64 x86_64'
           CONFIG: Release
         run: |
           set -euo pipefail
           bash tools/package.sh
 
           APP="build/dd/Build/Products/Release/84Key.app"
+          BIN="$APP/Contents/MacOS/84Key"
           DMG="build/84Key.dmg"
           test -d "$APP"
           test -f "$DMG"
@@ -95,6 +99,8 @@ jobs:
 
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" = "com.sangtrx.key84"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "0.2.0"
+          lipo -verify_arch arm64 x86_64 "$BIN"
+          echo "Release architectures: $(lipo -archs "$BIN")"
 
           codesign --verify --strict --verbose=2 "$APP"
           codesign --verify --verbose=2 "$DMG"
