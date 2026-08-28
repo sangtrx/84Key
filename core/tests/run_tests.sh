@@ -1,8 +1,31 @@
 #!/bin/bash
-# Build and run the 84Key engine + English-detection test harness.
+# Build and run the SangKey engine + English-detection test harness.
 # Exits non-zero if any case fails.
 set -euo pipefail
 cd "$(dirname "$0")"
+
+# The runtime ships two auditable English sources: an exact vendored CC0 corpus
+# plus a small SangKey-maintained supplement. Legacy harnesses intentionally keep
+# reading ../data/english_words.dat, so synthesize that compatibility stream only
+# for this test process. The old tracked google-10000-derived payload must never
+# return to the repository or release bundle.
+COMMON="../data/english_common_cc0.json"
+SUPPLEMENT="../data/english_supplement.dat"
+LEGACY_FIXTURE="../data/english_words.dat"
+EXPECTED_CORPORA_BLOB="8ec4ea53704dfca63f1ee00852c6bcc15411c49e"
+
+test "$(git hash-object "$COMMON")" = "$EXPECTED_CORPORA_BLOB" || {
+  echo "ERROR: vendored CC0 English corpus drifted from the reviewed upstream blob" >&2
+  exit 1
+}
+LC_ALL=C sort -cu "$SUPPLEMENT"
+if git ls-files --error-unmatch "$LEGACY_FIXTURE" >/dev/null 2>&1; then
+  echo "ERROR: legacy english_words.dat is tracked; remove the obsolete payload" >&2
+  exit 1
+fi
+cleanup_english_fixture() { rm -f "$LEGACY_FIXTURE"; }
+trap cleanup_english_fixture EXIT
+cat "$COMMON" "$SUPPLEMENT" > "$LEGACY_FIXTURE"
 
 ENGINE_SRC="../engine/Engine.cpp ../engine/Vietnamese.cpp ../engine/Macro.cpp \
             ../engine/SmartSwitchKey.cpp ../engine/ConvertTool.cpp ../engine/EnglishDetect.cpp"
@@ -50,6 +73,10 @@ env "${SAN_ENV[@]}" "$SAN_CAPS"
 PARSER="${TMPDIR:-/tmp}/key84_parser_safety_test"
 c++ "${SAN_FLAGS[@]}" -o "$PARSER" parser_safety_test.cpp $ENGINE_SRC
 env "${SAN_ENV[@]}" "$PARSER"
+
+# Remove the synthetic compatibility file before source-level provenance gates.
+cleanup_english_fixture
+trap - EXIT
 
 # Invariants of the macOS send layer (source-level — nothing here can call
 # CGEvent, and the properties they guard only fail under load in a real app).
