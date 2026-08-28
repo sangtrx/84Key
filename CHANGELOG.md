@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-28
+
+### Added
+
+- Split-process macOS architecture: an ephemeral AppKit + ServiceManagement
+  control app manages a headless `SangKeyAgent` that owns the event tap, typing
+  engine and dictionaries.
+- Bundled `SMAppService` LaunchAgent registration using
+  `Contents/Library/LaunchAgents` + `BundleProgram`, without writing user/system
+  LaunchAgent files or shelling out to `launchctl`.
+- Shared explicit `com.sangtrx.sangkey` CFPreferences domain with Darwin
+  notification propagation between control app and agent.
+- Production footprint gate for the real embedded agent; current CI measurements
+  keep idle RSS well below the 30 MiB budget while both dictionaries are loaded.
+- Universal `arm64 + x86_64` launcher and agent verification.
+
+### Changed
+
+- Always-on runtime no longer links AppKit, ServiceManagement, Swift, SwiftUI or
+  Combine. AppKit is resident only while the user opens the control surface.
+- Accessibility retry now uses exponential backoff capped at 15 seconds instead
+  of waking once per second indefinitely while approval is pending.
+- Background-agent status is refreshed whenever the control menu opens or the app
+  becomes active, so System Settings approval/revocation is reflected immediately.
+
+### Security
+
+- Release builds now require a Developer ID Application identity and verify the
+  expected Apple Team Identifier for both the nested agent and enclosing app.
+- Release preflight refuses unprotected `main` or unprotected release tags before
+  Apple signing credentials are exposed.
+- macOS CI/release toolchain is pinned to Xcode 26.6 build 17F113.
+- Notarized release payloads must pass both `stapler` and Gatekeeper `spctl`
+  assessment before publication.
+- DMGs include `LICENSE.txt`, `NOTICE.txt`, and `SOURCE.txt` pointing to the exact
+  corresponding source commit.
+
+## [0.3.0] - 2026-08-28
+
+### Changed
+
+- Rebranded the hardened macOS distribution to **SangKey** with independent bundle
+  identifiers under `com.sangtrx.sangkey`.
+- Replaced the SwiftUI/Combine resident menu application with a zero-Swift native
+  Objective-C++/AppKit control surface.
+- Reduced global event-tap subscriptions to the events needed by the input path
+  and added Mach-O linkage/footprint gates so heavy UI frameworks cannot silently
+  return to the always-on runtime.
+
 ## [0.2.0] - 2026-08-28
 
 ### Added
@@ -179,6 +228,8 @@ First macOS release.
   pipeline with drop-in `cases/*.txt` article fixtures, a live end-to-end script,
   and continuous integration.
 
-[Unreleased]: https://github.com/sangtrx/84Key/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/sangtrx/84Key/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/sangtrx/84Key/releases/tag/v0.4.0
+[0.3.0]: https://github.com/sangtrx/84Key/releases/tag/v0.3.0
 [0.2.0]: https://github.com/sangtrx/84Key/releases/tag/v0.2.0
 [0.1.0]: https://github.com/nghialuong/84Key/releases/tag/v0.1.0
