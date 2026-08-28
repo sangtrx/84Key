@@ -32,7 +32,7 @@ final class AppController {
         NSLog("SangKey dictionaries loaded = %@", dictsLoaded ? "YES" : "NO")
 
         langObserver = NotificationCenter.default.addObserver(
-            forName: Notification.Name(rawValue: Key84LanguageDidToggleNotification),
+            forName: Key84LanguageDidToggleNotification,
             object: nil,
             queue: .main
         ) { note in
