@@ -2,38 +2,40 @@
 
 Pushing a strict semantic-version tag such as `v0.4.0` triggers
 [`.github/workflows/release.yml`](../.github/workflows/release.yml). The workflow
-is intentionally fail-closed: source provenance is checked before Apple secrets
-are exposed, the signed/notarized artifact is validated before handoff, and a
-second human approval is required before the GitHub Release becomes public.
+is intentionally fail-closed around source provenance and the Apple distribution
+chain, but GitHub branch/tag rulesets are optional for this personal repository.
 
 SangKey has no embedded updater. Users update by explicitly opening the live
 GitHub Releases page in their browser.
 
-## 1. GitHub protections required
+## 1. Release source requirements
 
-Before the first public release, configure rulesets so:
+Before creating a tag:
 
-- `main` is protected;
-- PRs are required for `main`;
-- direct/force pushes and deletion of `main` are blocked;
-- `Core + security tests` and `Build macOS app + headless agent` are required;
-- tags matching `v*` are protected against update/deletion.
+- post-merge `main` CI must be green;
+- the release tag must point to the **exact current `main` HEAD**;
+- the tag must be strict `vMAJOR.MINOR.PATCH`;
+- that version must equal `MARKETING_VERSION` in `platform/macos/project.yml`.
 
-Release preflight reads GitHub's protected-ref state. If either `main` or the
-release tag is unprotected, signing does not start.
+Branch/tag protection is recommended for shared repositories, but SangKey's
+release workflow does **not** require a GitHub ruleset. Exact-main provenance is
+still mandatory and is checked again by release preflight before Apple secrets
+are exposed.
 
-Configure the GitHub environment **`release`** with required reviewers. The
-workflow deliberately uses that protected environment twice:
+Configure the GitHub environment **`release`** if you want approval gates or
+store Apple credentials there. The workflow uses that environment twice:
 
-1. approval before the Developer ID/notarization job authorizes Apple secrets;
-2. approval again before `Publish GitHub Release` lets a human test the exact
-   notarized artifact on a real Mac.
+1. before the Developer ID/notarization job;
+2. before `Publish GitHub Release`, so the exact notarized artifact can be tested
+   on a real Mac before publication.
 
-Do not approve the second gate until the acceptance checklist below passes.
+If the environment has no required reviewers, those jobs proceed without a
+manual approval pause.
 
 ## 2. Required Apple credentials
 
-Add these secrets to the protected `release` environment:
+Provide these secrets to the `release` environment or otherwise make them
+available to the workflow:
 
 | Secret | Purpose |
 | --- | --- |
@@ -74,8 +76,6 @@ Delete local credential exports afterward.
 - tag checkout equals `GITHUB_SHA`;
 - tag SHA equals current `main` HEAD;
 - tag version equals `MARKETING_VERSION`;
-- tag is protected;
-- `main` is protected;
 - complete engine/sanitizer/security suite passes.
 
 ### Build / sign / notarize
@@ -88,58 +88,42 @@ Delete local credential exports afterward.
 - nested agent identifier is `com.sangtrx.sangkey.agent`;
 - both agent and app are signed by Developer ID Application;
 - both `TeamIdentifier` values equal `DEVELOPER_ID_TEAM_ID`;
-- nested agent is signed before the enclosing app;
 - app and agent signatures verify;
-- production English detector corpus files are present and match their reviewed
-  byte-pinned Git blob SHAs in the built app and mounted DMG;
+- production English detector corpus files match their reviewed byte-pinned Git
+  blob SHAs in the built app and mounted DMG;
 - DMG is notarized and stapled;
 - DMG and mounted app pass Gatekeeper `spctl` assessment;
 - DMG includes `LICENSE.txt`, `NOTICE.txt`, `THIRD_PARTY_DATA.txt`, and
   `SOURCE.txt` pointing at the exact corresponding-source commit;
-- final `SHA256SUMS` is produced only after those checks.
+- final `SHA256SUMS` is generated and verified before publication.
 
 ### Publish
 
 The notarized payload is uploaded as a short-lived Actions artifact. The publish
-job has repository `contents: write` but does not reference Apple secrets. It uses
-the same protected `release` environment so required reviewers get a **second
-approval point after the artifact exists**.
-
-Before approving that job, download the `notarized-release` artifact from the
-workflow run and perform the acceptance test below.
+job has `contents: write` but does not receive Apple signing material.
 
 ## 4. Real-Mac signed-artifact acceptance
 
-Test the exact notarized DMG produced by `build-sign-notarize`, preferably on a
-Mac/user account without an existing SangKey registration:
+Before making a public release, test the exact notarized DMG produced by
+`build-sign-notarize`, preferably on a Mac/user account without an existing
+SangKey registration:
 
 1. Verify `SHA256SUMS` and `xcrun stapler validate`.
-2. Mount the DMG and inspect `THIRD_PARTY_DATA.txt` plus `SOURCE.txt` before
-   installation.
-3. Install `SangKey.app` into `/Applications`.
-4. Launch it once and enable the bundled background input agent.
-5. If macOS reports approval required, approve it under **General → Login Items**.
-6. Grant **Accessibility** to the actual `SangKeyAgent` identity.
-7. Confirm Telex, VNI, English auto-detection, VI/EN hotkey, Spotlight and browser
-   compatibility behavior in representative apps.
-8. Close `SangKey.app`; typing must continue while the AppKit control process is
-   gone.
-9. Log out/in or reboot; the registered agent must return without reopening the
-   control app.
-10. Reopen the control app and confirm background-agent status reflects System
-    Settings accurately.
-11. Disable the agent, close/reopen the control app, and confirm it remains
-    disabled. Re-enable and verify typing returns.
-12. Replace the installed app with the same signed candidate again and confirm
-    Accessibility/code identity remains stable.
+2. Install `SangKey.app` into `/Applications`.
+3. Launch it once and enable the bundled background input agent.
+4. Approve it under **General → Login Items** if macOS asks.
+5. Grant **Accessibility** to the actual `SangKeyAgent` identity.
+6. Confirm Telex, VNI, English auto-detection, VI/EN hotkey, Spotlight and browser compatibility.
+7. Close `SangKey.app`; typing must continue.
+8. Log out/in or reboot; the agent must return without reopening the control app.
+9. Disable/re-enable the agent and verify state persists correctly.
+10. Reinstall the same signed candidate and confirm Accessibility/code identity remains stable.
 
-If any step fails, **do not approve the publish job**. Fix on `main` and cut the
-next version rather than publishing the failing artifact.
+If any step fails, do not publish that artifact.
 
-## 5. Cut a release
+## 5. Cut v0.4.0
 
-After post-merge `main` CI is green and repository/environment protections are in
-place:
+After `main` CI is green:
 
 ```sh
 git switch main
@@ -149,7 +133,7 @@ git tag v0.4.0 "$MAIN_SHA"
 git push origin v0.4.0
 ```
 
-Do not tag a side branch or an older main commit; preflight rejects it.
+Do not tag a side branch or an older `main` commit; preflight rejects it.
 
 ## 6. Verify the published payload
 
@@ -186,19 +170,11 @@ cat /Volumes/SangKey/THIRD_PARTY_DATA.txt
 cat /Volumes/SangKey/SOURCE.txt
 ```
 
-Confirm the app ID, agent ID, expected Team ID, universal architectures, no heavy
-agent linkage, English corpus provenance, notarization, Gatekeeper result and exact
-source URL.
-
 ## 7. Local packaging
 
-`tools/package.sh` regenerates the project, builds both products, signs nested code
-in the correct order, copies GPL/provenance/source material, and creates the DMG.
-A notarized build must pass `stapler` and Gatekeeper before the script succeeds.
-
-A normal local package may use a development/ad-hoc identity. Public release sets
-`SANGKEY_REQUIRE_DEVELOPER_ID=1` and `SANGKEY_EXPECTED_TEAM_ID`, so it cannot
-silently fall back to Apple Development.
+`tools/package.sh` regenerates the project, builds both products, signs nested
+code in the correct order, copies GPL/provenance/source material, and creates the
+DMG. A notarized build must pass stapler and Gatekeeper before the script succeeds.
 
 ```sh
 SANGKEY_ARCHS="arm64 x86_64" bash tools/package.sh
