@@ -8,6 +8,16 @@ namespace {
 NSString *SigningIdentifierForPID(pid_t pid) {
     if (pid <= 0) return nil;
 
+    // FRONT_APP is consulted from the event-tap hot path. Code-signing lookup is
+    // much heavier than NSRunningApplication.bundleIdentifier, so cache it for
+    // the current frontmost PID and only re-resolve when focus moves to another
+    // process. The event tap and AX helpers run on the agent's main run loop.
+    static pid_t cachedPID = -1;
+    static NSString *cachedIdentifier = nil;
+    if (pid == cachedPID) return cachedIdentifier;
+    cachedPID = pid;
+    cachedIdentifier = nil;
+
     NSDictionary *attributes = @{
         (__bridge NSString *)kSecGuestAttributePid: @(pid)
     };
@@ -26,9 +36,9 @@ NSString *SigningIdentifierForPID(pid_t pid) {
     if (infoStatus != errSecSuccess || information == NULL) return nil;
 
     NSString *identifier = [(__bridge NSDictionary *)information objectForKey:(__bridge NSString *)kSecCodeInfoIdentifier];
-    NSString *result = [identifier copy];
+    cachedIdentifier = [identifier copy];
     CFRelease(information);
-    return result;
+    return cachedIdentifier;
 }
 
 NSString *CharactersIgnoringModifiers(CGEventRef event) {
@@ -112,7 +122,13 @@ NSString *CharactersIgnoringModifiers(CGEventRef event) {
     pid_t pid = 0;
     if (GetProcessPID(&psn, &pid) != noErr || pid <= 0) return nil;
 #pragma clang diagnostic pop
-    return [SangKeyRunningApplicationCompat runningApplicationWithProcessIdentifier:pid];
+
+    static pid_t cachedPID = -1;
+    static SangKeyRunningApplicationCompat *cachedApp = nil;
+    if (pid == cachedPID) return cachedApp;
+    cachedPID = pid;
+    cachedApp = [SangKeyRunningApplicationCompat runningApplicationWithProcessIdentifier:pid];
+    return cachedApp;
 }
 
 @end
