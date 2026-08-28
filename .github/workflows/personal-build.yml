@@ -1,0 +1,109 @@
+name: Personal Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    paths:
+      - '.github/workflows/personal-build.yml'
+      - 'platform/macos/**'
+      - 'core/**'
+      - 'tools/package.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  personal-dmg:
+    name: Build personal macOS DMG
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Select exact Xcode 26.6 (17F113)
+        run: |
+          set -euo pipefail
+          XCODE=/Applications/Xcode_26.6.app
+          test -d "$XCODE"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          test "$(xcodebuild -version | sed -n '1p')" = "Xcode 26.6"
+          test "$(xcodebuild -version | sed -n '2p')" = "Build version 17F113"
+
+      - name: Install verified XcodeGen 2.46.0
+        env:
+          XCODEGEN_URL: https://github.com/yonaskolb/XcodeGen/releases/download/2.46.0/xcodegen.zip
+          XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
+        run: |
+          set -euo pipefail
+          ZIP="$RUNNER_TEMP/xcodegen.zip"
+          DEST="$RUNNER_TEMP/xcodegen"
+          curl --fail --location --proto '=https' --tlsv1.2 "$XCODEGEN_URL" -o "$ZIP"
+          printf '%s  %s\n' "$XCODEGEN_SHA256" "$ZIP" | shasum -a 256 -c -
+          mkdir -p "$DEST"
+          unzip -q "$ZIP" -d "$DEST"
+          BIN=$(find "$DEST" -type f -name xcodegen -perm -111 -print -quit)
+          test -n "$BIN"
+          echo "$(dirname "$BIN")" >> "$GITHUB_PATH"
+
+      - name: Build universal ad-hoc DMG
+        env:
+          CODESIGN_IDENTITY: '-'
+          SANGKEY_VERSION: '0.4.0'
+          SANGKEY_ARCHS: 'arm64 x86_64'
+          SANGKEY_SOURCE_URL: 'https://github.com/${{ github.repository }}/tree/${{ github.sha }}'
+          CONFIG: Release
+        run: |
+          set -euo pipefail
+          bash tools/package.sh
+
+          APP="build/dd/Build/Products/Release/SangKey.app"
+          BIN="$APP/Contents/MacOS/SangKey"
+          AGENT="$APP/Contents/Resources/SangKeyAgent"
+          DMG="build/SangKey.dmg"
+
+          test -d "$APP"
+          test -x "$BIN"
+          test -x "$AGENT"
+          test -f "$DMG"
+          lipo "$BIN" -verify_arch arm64 x86_64
+          lipo "$AGENT" -verify_arch arm64 x86_64
+          if otool -L "$AGENT" | grep -Eqi 'AppKit|SwiftUI|Combine|/libswift|ServiceManagement'; then
+            echo "ERROR: personal-build agent linked non-headless runtime machinery" >&2
+            exit 1
+          fi
+          codesign --verify --strict --verbose=2 "$AGENT"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          hdiutil verify "$DMG"
+
+          mv "$DMG" build/SangKey-v0.4.0-personal.dmg
+          (
+            cd build
+            shasum -a 256 SangKey-v0.4.0-personal.dmg > SHA256SUMS
+            shasum -a 256 -c SHA256SUMS
+          )
+          cat > build/PERSONAL_BUILD.txt <<'EOF'
+          SangKey v0.4.0 personal build
+
+          This DMG is universal (arm64 + x86_64) and ad-hoc signed for personal testing.
+          It is NOT Developer ID signed or Apple-notarized, so macOS may require an explicit
+          Open / Open Anyway approval on first launch.
+
+          Public distribution should use the separate Release workflow, which requires
+          Developer ID signing, notarization, Gatekeeper validation, and checksum verification.
+          EOF
+
+      - name: Upload personal build artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6, Node 24
+        with:
+          name: SangKey-v0.4.0-personal-${{ github.sha }}
+          path: |
+            build/SangKey-v0.4.0-personal.dmg
+            build/SHA256SUMS
+            build/PERSONAL_BUILD.txt
+          if-no-files-found: error
+          retention-days: 7
