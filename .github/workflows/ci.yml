@@ -39,6 +39,14 @@ jobs:
           sudo xcode-select -s "$XCODE/Contents/Developer"
           xcodebuild -version
 
+      # The release job decodes the Developer ID certificate and ASC key on the
+      # same macOS runner family. Exercise BSD base64's real decode syntax here so
+      # a GNU-only flag cannot survive until the first secret-bearing tag build.
+      - name: Smoke-test release credential decoder
+        run: |
+          set -euo pipefail
+          test "$(printf 'ODRLZXk=' | /usr/bin/base64 -D)" = "84Key"
+
       # Download an immutable XcodeGen release asset and verify the digest
       # published by GitHub before executing it. This avoids executing a mutable
       # Homebrew formula inside a privileged release/build environment.
