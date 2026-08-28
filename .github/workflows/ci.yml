@@ -30,12 +30,16 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Select Xcode 26
+      - name: Select exact Xcode 26.6 (17F113)
         run: |
           set -euo pipefail
-          XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
-          [ -n "$XCODE" ] || { echo "ERROR: no Xcode 26.x found on runner" >&2; exit 1; }
+          XCODE=/Applications/Xcode_26.6.app
+          test -d "$XCODE" || { echo "ERROR: exact Xcode 26.6 is unavailable" >&2; exit 1; }
           sudo xcode-select -s "$XCODE/Contents/Developer"
+          XCODE_VERSION="$(xcodebuild -version | sed -n '1p')"
+          XCODE_BUILD="$(xcodebuild -version | sed -n '2p')"
+          test "$XCODE_VERSION" = "Xcode 26.6"
+          test "$XCODE_BUILD" = "Build version 17F113"
           xcodebuild -version
 
       - name: Smoke-test release credential decoder
@@ -144,6 +148,7 @@ jobs:
           CODESIGN_IDENTITY: '-'
           SANGKEY_VERSION: '0.4.0'
           SANGKEY_ARCHS: 'arm64 x86_64'
+          SANGKEY_SOURCE_URL: 'https://github.com/sangtrx/84Key/tree/${{ github.sha }}'
           CONFIG: Release
         run: |
           set -euo pipefail
@@ -159,6 +164,10 @@ jobs:
           test -x "$AGENT"
           test -f "$AGENT_PLIST"
           test -f "$DMG"
+          test -f build/dist/LICENSE.txt
+          test -f build/dist/NOTICE.txt
+          test -f build/dist/SOURCE.txt
+          grep -Fxq "$SANGKEY_SOURCE_URL" build/dist/SOURCE.txt
           test ! -e "$APP/Contents/Frameworks/Sparkle.framework"
           test ! -e "$APP/Contents/Resources/EngineUpstream.inc"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" = "com.sangtrx.sangkey"
