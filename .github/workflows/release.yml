@@ -1,51 +1,68 @@
 name: Release
 
-# Build, sign, and notarize a macOS DMG, then publish it as a GitHub Release.
-# Runs automatically when a version tag (e.g. v0.1.0) is pushed.
+# Security model:
+#   1. Build/sign/notarize runs with read-only repository permission and the
+#      protected `release` environment secrets.
+#   2. The signed artifact is handed to a separate publish job that has no Apple
+#      credentials and receives the short-lived contents:write token.
+#   3. Every reusable action is pinned to an immutable commit SHA.
+#   4. XcodeGen is downloaded at an exact version and SHA-256 verified before use.
 #
-# Secrets are read from the "release" environment and are never printed. GitHub
-# masks them in logs automatically; the steps below pass them via env only and
-# never echo their values. See docs/RELEASE.md for how to create the secrets.
+# This fork intentionally has no in-app auto-updater or appcast.
 on:
   push:
     tags:
       - 'v*'
 
-# Only the permission needed to publish the release; nothing else.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
-    name: Build & notarize DMG
+  build-sign-notarize:
+    name: Build, sign & notarize
     runs-on: macos-latest
-    # Hard cap so a stalled notarization (notarytool can hang on Apple's notary
-    # service) fails the job in minutes instead of burning the default 6-hour
-    # limit. package.sh already bounds + retries notarytool within this window.
     timeout-minutes: 45
     environment: release
-    steps:
-      - uses: actions/checkout@v4
+    permissions:
+      contents: read
 
-      # Build against the macOS 26 SDK (Xcode 26.x), not the runner's default
-      # Xcode 16 / macOS 15 SDK. An app built with the macOS 15 SDK does not adopt
-      # the macOS 26 (Tahoe) appearance, so on macOS 26 it renders in the legacy
-      # "washed-out" look — the exact bug that only showed up in the shipped DMG
-      # (local builds use Xcode 26 and looked fine). Pick the newest installed 26.x
-      # so this survives image patch bumps.
-      - name: Select Xcode 26 (macOS 26 SDK)
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify exact tag checkout
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Select Xcode 26
         run: |
           set -euo pipefail
           XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
-          [ -n "$XCODE" ] || { echo "ERROR: no Xcode 26.x found on the runner" >&2; exit 1; }
-          echo "Selecting $XCODE"
+          [ -n "$XCODE" ] || { echo "ERROR: no Xcode 26.x found on runner" >&2; exit 1; }
           sudo xcode-select -s "$XCODE/Contents/Developer"
           xcodebuild -version
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install verified XcodeGen 2.46.0
+        env:
+          XCODEGEN_URL: https://github.com/yonaskolb/XcodeGen/releases/download/2.46.0/xcodegen.zip
+          XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
+        run: |
+          set -euo pipefail
+          ZIP="$RUNNER_TEMP/xcodegen.zip"
+          DEST="$RUNNER_TEMP/xcodegen"
+          curl --fail --location --proto '=https' --tlsv1.2 "$XCODEGEN_URL" -o "$ZIP"
+          printf '%s  %s\n' "$XCODEGEN_SHA256" "$ZIP" | shasum -a 256 -c -
+          mkdir -p "$DEST"
+          unzip -q "$ZIP" -d "$DEST"
+          BIN=$(find "$DEST" -type f -name xcodegen -perm -111 -print -quit)
+          [ -n "$BIN" ] || { echo "ERROR: xcodegen executable missing" >&2; exit 1; }
+          echo "$(dirname "$BIN")" >> "$GITHUB_PATH"
+          "$BIN" --version
 
-      - name: Import Developer ID signing certificate
+      - name: Import Developer ID certificate
         env:
           CERT_P12: ${{ secrets.DEVELOPER_ID_CERT_P12 }}
           CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_CERT_PASSWORD }}
@@ -54,30 +71,25 @@ jobs:
           KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
           KEYCHAIN_PW="$(openssl rand -base64 24)"
           CERT_PATH="$RUNNER_TEMP/devid.p12"
-
-          # Decode the certificate without echoing it.
           printf '%s' "$CERT_P12" | base64 --decode > "$CERT_PATH"
-
+          chmod 600 "$CERT_PATH"
           security create-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
           security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
-          security import "$CERT_PATH" -k "$KEYCHAIN" -P "$CERT_PASSWORD" \
-            -T /usr/bin/codesign
-          # Allow codesign to use the key non-interactively.
+          security import "$CERT_PATH" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PW" "$KEYCHAIN" >/dev/null
-          # Put our keychain first in the search list so package.sh finds the identity.
-          security list-keychains -d user -s "$KEYCHAIN" \
-            $(security list-keychains -d user | sed 's/"//g')
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed 's/"//g')
           rm -f "$CERT_PATH"
 
-      - name: Write App Store Connect API key
+      - name: Write notarization API key
         env:
           ASC_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
         run: |
           set -euo pipefail
           printf '%s' "$ASC_KEY_P8" | base64 --decode > "$RUNNER_TEMP/asc.p8"
+          chmod 600 "$RUNNER_TEMP/asc.p8"
 
-      - name: Build, sign, notarize DMG
+      - name: Build signed and notarized DMG
         env:
           KEY84_ASC_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           KEY84_ASC_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
@@ -86,72 +98,58 @@ jobs:
           export KEY84_ASC_KEY_PATH="$RUNNER_TEMP/asc.p8"
           export KEY84_VERSION="${GITHUB_REF_NAME#v}"
           bash tools/package.sh
-          mv build/84Key.dmg "build/84Key-${GITHUB_REF_NAME}.dmg"
+          DMG="84Key-${GITHUB_REF_NAME}.dmg"
+          mv build/84Key.dmg "build/$DMG"
+          test ! -e build/dd/Build/Products/Release/84Key.app/Contents/Frameworks/Sparkle.framework
+          (
+            cd build
+            shasum -a 256 "$DMG" > SHA256SUMS
+            shasum -a 256 -c SHA256SUMS
+          )
 
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload notarized release payload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ${{ github.ref_name }}
-          generate_release_notes: true
-          files: build/84Key-${{ github.ref_name }}.dmg
+          name: notarized-release
+          path: |
+            build/84Key-${{ github.ref_name }}.dmg
+            build/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
 
-      # Sign the DMG with the Sparkle EdDSA key and add an <item> to the appcast
-      # on the gh-pages branch. The app reads it raw over HTTPS at
-      # raw.githubusercontent.com/nghialuong/84Key/gh-pages/appcast.xml (see Info.plist).
-      # Stable releases only: pre-release tags (anything with a '-', e.g.
-      # v0.1.0-rc1) still publish a Release above but are NOT advertised to
-      # stable users via the appcast. The DMG keeps living on GitHub Releases;
-      # the appcast just points at its per-tag download URL.
-      - name: Update Sparkle appcast (stable only)
-        if: ${{ !contains(github.ref_name, '-') }}
-        env:
-          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          TAG="$GITHUB_REF_NAME"
-          DMG="build/84Key-${TAG}.dmg"
-          APP="build/dd/Build/Products/Release/84Key.app"
-          SIGN_UPDATE="build/dd/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update"
-
-          # CFBundleVersion is what Sparkle compares to decide an update is newer
-          # (bump CURRENT_PROJECT_VERSION every release — see docs/RELEASE.md).
-          BUILD_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
-          MIN_SYSTEM="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist" 2>/dev/null || echo 14.0)"
-
-          # Sign the DMG; the private key is piped in from the secret (never written
-          # to disk). Output is: sparkle:edSignature="…" length="…".
-          SIG_ATTRS="$(printf '%s' "$SPARKLE_PRIVATE_ED_KEY" | "$SIGN_UPDATE" --ed-key-file - "$DMG")"
-
-          # Clone (or create) the gh-pages branch and splice in the new item.
-          REPO_URL="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          if git clone --branch gh-pages --single-branch "$REPO_URL" pages 2>/dev/null; then
-            echo "Updating existing gh-pages appcast"
-          else
-            echo "gh-pages branch not found — creating it"
-            git clone "$REPO_URL" pages
-            ( cd pages && git checkout --orphan gh-pages && git rm -rf . >/dev/null 2>&1 || true )
-          fi
-
-          APPCAST="pages/appcast.xml" \
-          DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/84Key-${TAG}.dmg" \
-          SHORT_VERSION="${TAG#v}" \
-          BUILD_VERSION="$BUILD_VERSION" \
-          MIN_SYSTEM="$MIN_SYSTEM" \
-          SIG_ATTRS="$SIG_ATTRS" \
-          RELEASE_PAGE="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" \
-          python3 tools/update_appcast.py
-
-          cd pages
-          touch .nojekyll   # serve appcast.xml verbatim (no Jekyll processing)
-          git add appcast.xml .nojekyll
-          git -c user.name="github-actions[bot]" \
-              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-              commit -m "appcast: 84Key ${TAG}"
-          git push origin gh-pages
-
-      - name: Clean up secrets material
+      - name: Clean up signing material
         if: always()
         run: |
           security delete-keychain "$RUNNER_TEMP/build.keychain-db" 2>/dev/null || true
-          rm -f "$RUNNER_TEMP/asc.p8" "$RUNNER_TEMP/devid.p12"
+          rm -f "$RUNNER_TEMP/asc.p8" "$RUNNER_TEMP/devid.p12" "$RUNNER_TEMP/xcodegen.zip"
+
+  publish:
+    name: Publish GitHub Release
+    needs: build-sign-notarize
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download notarized payload
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: notarized-release
+          path: dist
+
+      - name: Verify payload checksum
+        working-directory: dist
+        run: shasum -a 256 -c SHA256SUMS
+
+      - name: Publish immutable release payload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/84Key-${GITHUB_REF_NAME}.dmg" \
+            "dist/SHA256SUMS" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag
