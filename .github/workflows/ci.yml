@@ -104,6 +104,7 @@ jobs:
           test -d "$APP"
           test -f "$DMG"
           test ! -e "$APP/Contents/Frameworks/Sparkle.framework"
+          test ! -e "$APP/Contents/Resources/EngineUpstream.inc"
 
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" = "com.sangtrx.key84"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "0.2.0"
