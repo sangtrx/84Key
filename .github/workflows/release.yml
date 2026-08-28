@@ -1,17 +1,5 @@
 name: Release
 
-# Security model:
-#   1. A secret-free preflight verifies the version tag, exact main provenance,
-#      source version, and the full core/security test gate.
-#   2. Build/sign/notarize runs only after preflight, with read-only repository
-#      permission and the protected `release` environment secrets.
-#   3. Signing material is destroyed before any artifact-upload action runs.
-#   4. The signed artifact is handed to a separate publish job that has no Apple
-#      credentials and receives the short-lived contents:write token.
-#   5. Every reusable action is pinned to an immutable commit SHA.
-#   6. XcodeGen is downloaded at an exact version and SHA-256 verified before use.
-#
-# This fork intentionally has no in-app auto-updater or appcast.
 on:
   push:
     tags:
@@ -26,7 +14,6 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -44,14 +31,11 @@ jobs:
           git fetch --no-tags origin main:refs/remotes/origin/main
           MAIN_SHA="$(git rev-parse refs/remotes/origin/main)"
           test "$MAIN_SHA" = "$GITHUB_SHA" || {
-            echo "ERROR: tag $GITHUB_REF_NAME points to $GITHUB_SHA, but main is $MAIN_SHA" >&2
+            echo "ERROR: tag points to $GITHUB_SHA, but main is $MAIN_SHA" >&2
             exit 1
           }
           SOURCE_VERSION="$(awk -F'"' '/MARKETING_VERSION:/ { print $2; exit }' platform/macos/project.yml)"
-          test "v$SOURCE_VERSION" = "$GITHUB_REF_NAME" || {
-            echo "ERROR: tag $GITHUB_REF_NAME does not match source MARKETING_VERSION $SOURCE_VERSION" >&2
-            exit 1
-          }
+          test "v$SOURCE_VERSION" = "$GITHUB_REF_NAME"
 
       - name: Run core and security release gate
         run: bash core/tests/run_tests.sh
@@ -72,15 +56,13 @@ jobs:
           fetch-depth: 1
 
       - name: Verify exact tag checkout
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 
       - name: Select Xcode 26
         run: |
           set -euo pipefail
           XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
-          [ -n "$XCODE" ] || { echo "ERROR: no Xcode 26.x found on runner" >&2; exit 1; }
+          [ -n "$XCODE" ] || { echo "ERROR: no Xcode 26.x found" >&2; exit 1; }
           sudo xcode-select -s "$XCODE/Contents/Developer"
           xcodebuild -version
 
@@ -97,9 +79,8 @@ jobs:
           mkdir -p "$DEST"
           unzip -q "$ZIP" -d "$DEST"
           BIN=$(find "$DEST" -type f -name xcodegen -perm -111 -print -quit)
-          [ -n "$BIN" ] || { echo "ERROR: xcodegen executable missing" >&2; exit 1; }
+          [ -n "$BIN" ]
           echo "$(dirname "$BIN")" >> "$GITHUB_PATH"
-          "$BIN" --version
 
       - name: Import Developer ID certificate
         env:
@@ -110,8 +91,6 @@ jobs:
           KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
           KEYCHAIN_PW="$(openssl rand -base64 24)"
           CERT_PATH="$RUNNER_TEMP/devid.p12"
-          # This job always runs on macOS. Use BSD base64's native decode flag;
-          # GNU-only `--decode` is not portable to the hosted macOS runner.
           printf '%s' "$CERT_P12" | /usr/bin/base64 -D > "$CERT_PATH"
           chmod 600 "$CERT_PATH"
           security create-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
@@ -132,18 +111,23 @@ jobs:
 
       - name: Build signed and notarized universal DMG
         env:
-          KEY84_ASC_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
-          KEY84_ASC_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
-          KEY84_ARCHS: 'arm64 x86_64'
+          SANGKEY_ASC_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          SANGKEY_ASC_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+          SANGKEY_ARCHS: 'arm64 x86_64'
         run: |
           set -euo pipefail
-          export KEY84_ASC_KEY_PATH="$RUNNER_TEMP/asc.p8"
-          export KEY84_VERSION="${GITHUB_REF_NAME#v}"
+          export SANGKEY_ASC_KEY_PATH="$RUNNER_TEMP/asc.p8"
+          export SANGKEY_VERSION="${GITHUB_REF_NAME#v}"
           bash tools/package.sh
-          APP="build/dd/Build/Products/Release/84Key.app"
-          lipo "$APP/Contents/MacOS/84Key" -verify_arch arm64 x86_64
-          DMG="84Key-${GITHUB_REF_NAME}.dmg"
-          mv build/84Key.dmg "build/$DMG"
+          APP="build/dd/Build/Products/Release/SangKey.app"
+          BIN="$APP/Contents/MacOS/SangKey"
+          lipo "$BIN" -verify_arch arm64 x86_64
+          if otool -L "$BIN" | grep -Eq '/(SwiftUI|Combine)\.framework/'; then
+            echo "ERROR: release binary linked SwiftUI or Combine" >&2
+            exit 1
+          fi
+          DMG="SangKey-${GITHUB_REF_NAME}.dmg"
+          mv build/SangKey.dmg "build/$DMG"
           test ! -e "$APP/Contents/Frameworks/Sparkle.framework"
           test ! -e "$APP/Contents/Resources/EngineUpstream.inc"
           (
@@ -152,8 +136,6 @@ jobs:
             shasum -a 256 -c SHA256SUMS
           )
 
-      # Destroy credentials before invoking even a pinned artifact helper. If the
-      # build fails this still runs; subsequent normal steps remain skipped.
       - name: Clean up signing material
         if: always()
         run: |
@@ -165,7 +147,7 @@ jobs:
         with:
           name: notarized-release
           path: |
-            build/84Key-${{ github.ref_name }}.dmg
+            build/SangKey-${{ github.ref_name }}.dmg
             build/SHA256SUMS
           if-no-files-found: error
           retention-days: 1
@@ -176,7 +158,6 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
-
     steps:
       - name: Download notarized payload
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7, Node 24
@@ -194,7 +175,7 @@ jobs:
         run: |
           set -euo pipefail
           gh release create "$GITHUB_REF_NAME" \
-            "dist/84Key-${GITHUB_REF_NAME}.dmg" \
+            "dist/SangKey-${GITHUB_REF_NAME}.dmg" \
             "dist/SHA256SUMS" \
             --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \
