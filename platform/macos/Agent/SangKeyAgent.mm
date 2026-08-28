@@ -20,11 +20,27 @@ NSString *AgentResourceDirectory(void) {
 
 BOOL LoadDictionaries(NSString *resourceDirectory) {
     if (resourceDirectory == nil) return NO;
-    NSString *englishPath = [resourceDirectory stringByAppendingPathComponent:@"english_words.dat"];
+
+    // Keep third-party data and SangKey-maintained detector additions separate on
+    // disk so their provenance/licensing remains auditable. EnglishDetect's input
+    // format is intentionally token based, so concatenating the two immutable
+    // byte buffers in memory is equivalent to one word-list stream without
+    // creating another generated artifact that could lose provenance.
+    NSString *commonPath = [resourceDirectory stringByAppendingPathComponent:@"english_common_cc0.json"];
+    NSString *supplementPath = [resourceDirectory stringByAppendingPathComponent:@"english_supplement.dat"];
     NSString *vietnamesePath = [resourceDirectory stringByAppendingPathComponent:@"viet_telex.dat"];
-    NSData *english = [NSData dataWithContentsOfFile:englishPath options:NSDataReadingMappedIfSafe error:nil];
+
+    NSData *common = [NSData dataWithContentsOfFile:commonPath options:NSDataReadingMappedIfSafe error:nil];
+    NSData *supplement = [NSData dataWithContentsOfFile:supplementPath options:NSDataReadingMappedIfSafe error:nil];
     NSData *vietnamese = [NSData dataWithContentsOfFile:vietnamesePath options:NSDataReadingMappedIfSafe error:nil];
-    if (english == nil || vietnamese == nil) return NO;
+    if (common == nil || supplement == nil || vietnamese == nil) return NO;
+
+    NSMutableData *english = [NSMutableData dataWithCapacity:common.length + supplement.length + 1];
+    [english appendData:common];
+    const char newline = '\n';
+    [english appendBytes:&newline length:1];
+    [english appendData:supplement];
+
     initEnglishDict((const Byte *)english.bytes, (int)english.length);
     initVietByTelexDict((const Byte *)vietnamese.bytes, (int)vietnamese.length);
     return isEnglishDictReady() ? YES : NO;
