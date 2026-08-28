@@ -22,6 +22,11 @@ targets:
       - path: Bridge
       - path: ../../core/engine
         name: Engine
+        # EngineUpstream.inc is compile-time implementation included by Engine.cpp.
+        # XcodeGen otherwise treats the unknown .inc extension as a resource and
+        # copies the full legacy source into the shipped application bundle.
+        excludes:
+          - EngineUpstream.inc
       # Bundled dictionaries for automatic English detection (Copy Bundle Resources).
       - path: ../../core/data/english_words.dat
         buildPhase: resources

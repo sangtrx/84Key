@@ -22,6 +22,9 @@
 # Other env overrides:
 #   CODESIGN_IDENTITY  — signing identity (else auto-detected from the keychain).
 #   KEY84_VERSION      — override MARKETING_VERSION (e.g. from a release tag).
+#   KEY84_ARCHS        — optional Xcode ARCHS value, e.g. "arm64 x86_64" for a
+#                        universal release. Local builds default to Xcode's host
+#                        architecture when this is unset.
 #
 set -euo pipefail
 
@@ -66,9 +69,14 @@ rm -rf "$BUILD"
 mkdir -p "$BUILD"
 VERSION_OVERRIDE=()
 [ -n "${KEY84_VERSION:-}" ] && VERSION_OVERRIDE=(MARKETING_VERSION="$KEY84_VERSION")
+ARCH_OVERRIDE=()
+if [ -n "${KEY84_ARCHS:-}" ]; then
+  ARCH_OVERRIDE=(ARCHS="$KEY84_ARCHS" ONLY_ACTIVE_ARCH=NO)
+  echo "    Architectures: $KEY84_ARCHS"
+fi
 xcodebuild -project "$MACOS/$APP_NAME.xcodeproj" -scheme "$APP_NAME" \
   -configuration "$CONFIG" -derivedDataPath "$BUILD/dd" \
-  CODE_SIGNING_ALLOWED=NO "${VERSION_OVERRIDE[@]}" \
+  CODE_SIGNING_ALLOWED=NO "${VERSION_OVERRIDE[@]}" "${ARCH_OVERRIDE[@]}" \
   build >/dev/null
 
 APP="$BUILD/dd/Build/Products/$CONFIG/$APP_NAME.app"

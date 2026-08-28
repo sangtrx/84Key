@@ -1,13 +1,15 @@
 name: Release
 
 # Security model:
-#   1. Build/sign/notarize runs with read-only repository permission and the
-#      protected `release` environment secrets.
-#   2. Signing material is destroyed before any artifact-upload action runs.
-#   3. The signed artifact is handed to a separate publish job that has no Apple
+#   1. A secret-free preflight verifies the version tag, exact main provenance,
+#      source version, and the full core/security test gate.
+#   2. Build/sign/notarize runs only after preflight, with read-only repository
+#      permission and the protected `release` environment secrets.
+#   3. Signing material is destroyed before any artifact-upload action runs.
+#   4. The signed artifact is handed to a separate publish job that has no Apple
 #      credentials and receives the short-lived contents:write token.
-#   4. Every reusable action is pinned to an immutable commit SHA.
-#   5. XcodeGen is downloaded at an exact version and SHA-256 verified before use.
+#   5. Every reusable action is pinned to an immutable commit SHA.
+#   6. XcodeGen is downloaded at an exact version and SHA-256 verified before use.
 #
 # This fork intentionally has no in-app auto-updater or appcast.
 on:
@@ -19,9 +21,45 @@ permissions:
   contents: read
 
 jobs:
+  preflight:
+    name: Verify release source
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Validate tag, main provenance, and source version
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "ERROR: release tag must be strict semver vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          }
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          MAIN_SHA="$(git rev-parse refs/remotes/origin/main)"
+          test "$MAIN_SHA" = "$GITHUB_SHA" || {
+            echo "ERROR: tag $GITHUB_REF_NAME points to $GITHUB_SHA, but main is $MAIN_SHA" >&2
+            exit 1
+          }
+          SOURCE_VERSION="$(awk -F'"' '/MARKETING_VERSION:/ { print $2; exit }' platform/macos/project.yml)"
+          test "v$SOURCE_VERSION" = "$GITHUB_REF_NAME" || {
+            echo "ERROR: tag $GITHUB_REF_NAME does not match source MARKETING_VERSION $SOURCE_VERSION" >&2
+            exit 1
+          }
+
+      - name: Run core and security release gate
+        run: bash core/tests/run_tests.sh
+
   build-sign-notarize:
     name: Build, sign & notarize
-    runs-on: macos-latest
+    needs: preflight
+    runs-on: macos-26
     timeout-minutes: 45
     environment: release
     permissions:
@@ -72,7 +110,9 @@ jobs:
           KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
           KEYCHAIN_PW="$(openssl rand -base64 24)"
           CERT_PATH="$RUNNER_TEMP/devid.p12"
-          printf '%s' "$CERT_P12" | base64 --decode > "$CERT_PATH"
+          # This job always runs on macOS. Use BSD base64's native decode flag;
+          # GNU-only `--decode` is not portable to the hosted macOS runner.
+          printf '%s' "$CERT_P12" | /usr/bin/base64 -D > "$CERT_PATH"
           chmod 600 "$CERT_PATH"
           security create-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
@@ -87,21 +127,25 @@ jobs:
           ASC_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
         run: |
           set -euo pipefail
-          printf '%s' "$ASC_KEY_P8" | base64 --decode > "$RUNNER_TEMP/asc.p8"
+          printf '%s' "$ASC_KEY_P8" | /usr/bin/base64 -D > "$RUNNER_TEMP/asc.p8"
           chmod 600 "$RUNNER_TEMP/asc.p8"
 
-      - name: Build signed and notarized DMG
+      - name: Build signed and notarized universal DMG
         env:
           KEY84_ASC_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           KEY84_ASC_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+          KEY84_ARCHS: 'arm64 x86_64'
         run: |
           set -euo pipefail
           export KEY84_ASC_KEY_PATH="$RUNNER_TEMP/asc.p8"
           export KEY84_VERSION="${GITHUB_REF_NAME#v}"
           bash tools/package.sh
+          APP="build/dd/Build/Products/Release/84Key.app"
+          lipo "$APP/Contents/MacOS/84Key" -verify_arch arm64 x86_64
           DMG="84Key-${GITHUB_REF_NAME}.dmg"
           mv build/84Key.dmg "build/$DMG"
-          test ! -e build/dd/Build/Products/Release/84Key.app/Contents/Frameworks/Sparkle.framework
+          test ! -e "$APP/Contents/Frameworks/Sparkle.framework"
+          test ! -e "$APP/Contents/Resources/EngineUpstream.inc"
           (
             cd build
             shasum -a 256 "$DMG" > SHA256SUMS
@@ -117,7 +161,7 @@ jobs:
           rm -f "$RUNNER_TEMP/asc.p8" "$RUNNER_TEMP/devid.p12" "$RUNNER_TEMP/xcodegen.zip"
 
       - name: Upload notarized release payload
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6, Node 24
         with:
           name: notarized-release
           path: |
@@ -135,7 +179,7 @@ jobs:
 
     steps:
       - name: Download notarized payload
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7, Node 24
         with:
           name: notarized-release
           path: dist

@@ -1,10 +1,12 @@
 # Releasing the hardened 84Key fork (macOS)
 
-Pushing a version tag (for example `v0.2.0`) triggers
-[`.github/workflows/release.yml`](../.github/workflows/release.yml). The workflow
-builds the app, signs it with Developer ID, notarizes the DMG with Apple, computes
-a SHA-256 checksum, then hands the result to a separate job that publishes the
-GitHub Release.
+Pushing a strict semantic-version tag (for example `v0.2.0`) triggers
+[`.github/workflows/release.yml`](../.github/workflows/release.yml). Before Apple
+credentials are made available, a secret-free preflight verifies that the tag is
+the exact current `main` commit, the tag matches `MARKETING_VERSION`, and the full
+core/security gate passes. Only then does the workflow build a universal
+`arm64 + x86_64` app, sign it with Developer ID, notarize the DMG with Apple,
+compute a SHA-256 checksum, and hand the result to a separate publish job.
 
 This fork deliberately has **no in-app auto-updater or appcast**. Users update by
 opening the GitHub Releases page from the menu and installing a signed/notarized
@@ -56,18 +58,36 @@ rm -f devid.p12 devid.p12.b64 AuthKey_XXXXXX.p8 asc.p8.b64
 
 ## 2. Release security model
 
-The workflow has two jobs with deliberately different authority.
+The workflow has three stages with deliberately different authority.
+
+### Secret-free preflight
+
+- runs on Ubuntu with `contents: read` only;
+- accepts only tags matching `vMAJOR.MINOR.PATCH`;
+- verifies the tag checkout is exactly `GITHUB_SHA`;
+- fetches `origin/main` and requires the tag SHA to equal the **current main
+  HEAD**, so an accidentally tagged side branch or older unreviewed commit cannot
+  be signed;
+- requires the tag version to match `MARKETING_VERSION` in
+  `platform/macos/project.yml`;
+- runs `core/tests/run_tests.sh`, including engine/typing tests, sanitizer runs,
+  parser safety, send-layer invariants, and distribution-security invariants;
+- has no access to the protected `release` environment or Apple credentials.
 
 ### Build / sign / notarize
 
-- protected `release` environment;
+- starts only after the preflight succeeds;
+- uses the protected `release` environment;
 - Apple credentials are available here;
 - GitHub repository permission is **`contents: read` only**;
+- runs on a pinned macOS 26 runner family rather than a moving `macos-latest`;
 - `actions/checkout` is pinned to an immutable commit SHA;
 - XcodeGen 2.46.0 is downloaded from its exact GitHub release URL and checked
   against SHA-256
   `4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806`
   before execution;
+- the Release app is cross-built as a universal `arm64 + x86_64` binary and the
+  workflow verifies both slices with `lipo`;
 - the final DMG is Developer ID signed and Apple notarized;
 - the workflow asserts that no `Sparkle.framework` is embedded;
 - a final `SHA256SUMS` file is generated after notarization/stapling.
@@ -88,18 +108,20 @@ credentials cannot modify repository contents or publish a release.
 ## 3. Cut a release
 
 Update `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` in
-`platform/macos/project.yml` when appropriate, merge the change to `main`, then
-tag the exact commit you intend to ship:
+`platform/macos/project.yml` when appropriate, merge the change to `main`, and
+wait for the `main` CI run to pass. Then tag **that exact current main HEAD**:
 
 ```sh
 git switch main
 git pull --ff-only
-git tag v0.2.0 <EXACT_COMMIT_SHA>
+MAIN_SHA="$(git rev-parse HEAD)"
+git tag v0.2.0 "$MAIN_SHA"
 git push origin v0.2.0
 ```
 
-The release workflow verifies that the checked-out commit is exactly
-`GITHUB_SHA` for the tag before importing signing credentials.
+Do not tag a side branch or an older main commit. The release preflight rejects
+it, and also rejects a tag whose version differs from source
+`MARKETING_VERSION`.
 
 ## 4. Verify the published payload
 
@@ -116,10 +138,12 @@ After mounting the DMG, you can additionally verify the application:
 ```sh
 codesign --verify --deep --strict --verbose=2 /Volumes/84Key/84Key.app
 codesign -dv --verbose=4 /Volumes/84Key/84Key.app
+lipo /Volumes/84Key/84Key.app/Contents/MacOS/84Key -archs
 ```
 
-Confirm the bundle identifier is `com.sangtrx.key84` and the signing identity is
-the one controlled by this fork's release owner.
+Confirm the bundle identifier is `com.sangtrx.key84`, the executable contains
+both `arm64` and `x86_64`, and the signing identity is the one controlled by this
+fork's release owner.
 
 ## 5. Local packaging
 
@@ -127,6 +151,13 @@ the one controlled by this fork's release owner.
 building. Install XcodeGen yourself for local development and verify the source
 or package you use. CI does **not** use Homebrew for XcodeGen; it uses the
 checksum-pinned release archive described above.
+
+A normal local package uses Xcode's host architecture. To reproduce the universal
+release architecture locally, set:
+
+```sh
+KEY84_ARCHS="arm64 x86_64" bash tools/package.sh
+```
 
 For a local notarized build, configure either a notarytool keychain profile or
 the `KEY84_ASC_KEY_PATH`, `KEY84_ASC_KEY_ID`, and `KEY84_ASC_ISSUER_ID`
@@ -139,5 +170,5 @@ There is no background update check. The menu item **Kiểm tra cập nhật…*
 <https://github.com/sangtrx/84Key/releases/latest>
 
 The browser/download flow is intentionally outside the keyboard process. Users
-should install only a release whose checksum, Developer ID signature, and Apple
-notarization validate successfully.
+should install only a release whose checksum, Developer ID signature, Apple
+notarization, and expected universal architecture validate successfully.

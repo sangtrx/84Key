@@ -23,6 +23,7 @@ final class AppSettings: ObservableObject {
         "vQuickTelex": 0,
         "vRestoreIfWrongSpelling": 0,
         "vFixRecommendBrowser": 0,      // off: avoids stray chars in normal fields
+        "vFixWebContentEditor": 1,      // on: paced browser/editor correction path
         "vUseMacro": 0,
         "vUseSmartSwitchKey": 1,
         "vUpperCaseFirstChar": 0,
@@ -49,6 +50,7 @@ final class AppSettings: ObservableObject {
     @Published var quickTelex: Bool { didSet { persistAndApply() } }
     @Published var restoreIfWrongSpelling: Bool { didSet { persistAndApply() } }
     @Published var fixRecommendBrowser: Bool { didSet { persistAndApply() } }
+    @Published var fixWebContentEditor: Bool { didSet { persistAndApply() } }
     @Published var useMacro: Bool { didSet { persistAndApply() } }
     @Published var smartSwitchKey: Bool { didSet { persistAndApply() } }
     @Published var upperCaseFirstChar: Bool { didSet { persistAndApply() } }
@@ -74,6 +76,7 @@ final class AppSettings: ObservableObject {
         quickTelex = d.integer(forKey: "vQuickTelex") != 0
         restoreIfWrongSpelling = d.integer(forKey: "vRestoreIfWrongSpelling") != 0
         fixRecommendBrowser = d.integer(forKey: "vFixRecommendBrowser") != 0
+        fixWebContentEditor = d.integer(forKey: "vFixWebContentEditor") != 0
         useMacro = d.integer(forKey: "vUseMacro") != 0
         smartSwitchKey = d.integer(forKey: "vUseSmartSwitchKey") != 0
         upperCaseFirstChar = d.integer(forKey: "vUpperCaseFirstChar") != 0
@@ -115,6 +118,7 @@ final class AppSettings: ObservableObject {
             "vQuickTelex": quickTelex ? 1 : 0,
             "vRestoreIfWrongSpelling": restoreIfWrongSpelling ? 1 : 0,
             "vFixRecommendBrowser": fixRecommendBrowser ? 1 : 0,
+            "vFixWebContentEditor": fixWebContentEditor ? 1 : 0,
             "vUseMacro": useMacro ? 1 : 0,
             "vUseSmartSwitchKey": smartSwitchKey ? 1 : 0,
             "vUpperCaseFirstChar": upperCaseFirstChar ? 1 : 0,

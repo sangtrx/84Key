@@ -1,4 +1,4 @@
-# Backspace across a word boundary must not corrupt the word you go back to.
+# Regression cases that must gate the build.
 #
 # The engine keeps two buffers for the word being typed: TypingWord (what is on
 # screen) and KeyStates (the raw keys you pressed, used by English detection).
@@ -7,15 +7,15 @@
 # visible word and rewrites it from whatever raw keys are left over — typing
 # "animated" produced "ed".
 #
-# "{BS}" presses Backspace. Every case ends in another word so the break the
-# restore hangs off of is explicit rather than trailing whitespace.
+# "{BS}" presses Backspace. Every backspace case ends in another word so the
+# break the restore hangs off of is explicit rather than trailing whitespace.
 #
 # This file GATES the build (see isGatedFixture in typing_sim_test.cpp): these
 # pin specific defects, unlike the report-only article round-trips.
 @input=telex
 @detect=on
 
-# The reported bug: back up into the previous word, type on, break.
+# The reported backspace bug: back up into the previous word, type on, break.
 animat ed{BS}{BS}{BS}ed ok => animated ok
 # Same desync, and the leftover raw keys spell a different English word.
 hello ok{BS}{BS}{BS}world ok => helloworld ok
@@ -27,3 +27,25 @@ ddoongf{BS}s ok => đốn ok
 
 # Backspacing over several words and a space, then typing a fresh one.
 toi an com{BS}{BS}{BS}{BS}{BS}{BS}xyz ok => toi xyz ok
+
+# Alphanumeric developer/code tokens. In Telex, an unshifted digit terminates the
+# current letter token so any deferred English/compound restore happens BEFORE
+# the digit. This prevents a temporary Vietnamese mark from leaking into tokens
+# such as dashboard1. Multi-digit suffixes also prove that the next digit starts
+# from a clean engine session.
+dashboard1 ok => dashboard1 ok
+window1 ok => window1 ok
+sha256 ok => sha256 ok
+utf8 ok => utf8 ok
+h264 ok => h264 ok
+gpt5 ok => gpt5 ok
+
+# A real Vietnamese word immediately before a digit must keep its mark; the digit
+# is a boundary, not an instruction to restore Vietnamese text to raw Telex.
+thangs8 ok => tháng8 ok
+
+# Simple Telex has the same letter-based modifier model, so it shares the digit
+# boundary policy. VNI is deliberately NOT listed here: engine_test.cpp's gating
+# VNI section (including a61 -> ấ) proves numeric tone/modifier semantics remain.
+@input=simple1
+dashboard1 ok => dashboard1 ok

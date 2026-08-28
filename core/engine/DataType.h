@@ -129,7 +129,12 @@ struct vKeyHookState {
 //Utilities macro
 #define IS_CONSONANT(keyCode) !(keyCode == KEY_A || keyCode == KEY_E || keyCode == KEY_U || keyCode == KEY_Y || keyCode == KEY_I || keyCode == KEY_O)
 //#define IS_MARK_KEY(keyCode) (keyCode == KEY_S || keyCode == KEY_F || keyCode == KEY_R || keyCode == KEY_J || keyCode == KEY_X)
-#define CHR(index) (Uint16)TypingWord[index]
+// Legacy callers frequently probe relative positions such as `_index - 1`.
+// Guard the shared character accessor so an empty/new word cannot turn that
+// probe into TypingWord[-1] undefined behavior. Returning 0 means "no key",
+// which preserves the intent of every comparison-based CHR() call while making
+// the boundary explicit and sanitizer-safe.
+#define CHR(index) (((index) >= 0 && (index) < MAX_BUFF) ? (Uint16)TypingWord[(index)] : (Uint16)0)
 #define IS_SPECIALKEY(keyCode) \
         (vInputType == vTelex ? \
             keyCode == KEY_W || keyCode == KEY_E || keyCode == KEY_R || keyCode == KEY_O || keyCode == KEY_LEFT_BRACKET || \

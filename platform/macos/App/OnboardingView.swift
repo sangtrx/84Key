@@ -134,8 +134,15 @@ final class OnboardingController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        guard let closingWindow = notification.object as? NSWindow,
+              closingWindow === window else { return }
         pinner?.detach()
         pinner = nil
+        // `isReleasedWhenClosed` is false so the controller must drop its strong
+        // reference when the user presses the red close button. Otherwise the
+        // hidden hosting tree survives for the lifetime of the menu-bar process.
+        closingWindow.delegate = nil
+        window = nil
         NSApp.setActivationPolicy(.accessory)
     }
 }

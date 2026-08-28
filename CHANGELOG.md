@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-28
+
+### Added
+
+- Hardened fork identity and a native macOS release pipeline for this repository.
+- Secret-free release preflight that accepts only strict semantic-version tags on
+  the exact current `main` commit, verifies the source version, and reruns the
+  full core/security gate before Apple signing credentials become available.
+- Universal `arm64 + x86_64` Release packaging and CI verification, so public
+  builds support both Apple Silicon and Intel Macs on the documented macOS 14+
+  baseline.
+- Full engine and macOS typing-simulation ASan/UBSan runs in addition to the
+  malformed-parser sanitizer suite.
+- A Settings escape hatch for the paced browser/web-editor compatibility path.
+- A dedicated alphanumeric-token regression gate, including sanitizer coverage,
+  for developer-style input such as `dashboard1`, `sha256`, `utf8`, `h264` and
+  `gpt5`, with VNI digit semantics checked separately.
+
+### Fixed
+
+- Accessibility status can no longer remain falsely red after the event tap has
+  already started successfully; a live tap now counts as effective permission.
+- The legacy typing-buffer `CHR()` accessor now bounds-checks relative probes such
+  as `_index - 1`, preventing an empty-word `TypingWord[-1]` undefined-behavior
+  read found by the expanded sanitizer gate.
+- About now points to `sangtrx/84Key` as the hardened source while preserving the
+  original `nghialuong/84Key` project and OpenKey attribution separately.
+- Telex and Simple Telex now treat an unshifted digit as a token boundary, so an
+  English/compound restore completes before the digit instead of leaving a
+  temporary Vietnamese accent in alphanumeric code tokens. VNI is excluded from
+  this policy because its numeric keys remain tone/vowel modifiers.
+- Run at Login now reconciles its Settings toggle to the effective
+  `SMAppService` state when registration is rejected or requires approval.
+- Closing onboarding now releases its retained window/SwiftUI hosting tree rather
+  than keeping a hidden first-run window alive for the menu-bar process lifetime.
+
+### Security
+
+- Removed the embedded auto-updater/appcast path from the hardened distribution;
+  update checks are explicit browser navigation to this fork's Releases page.
+- Release signing/notarization runs with repository read permission only, while
+  publication is isolated in a separate job with no Apple credentials.
+- Reusable GitHub Actions are immutable-SHA pinned. Checkout and artifact-handoff
+  actions use reviewed Node 24 releases; XcodeGen is exact-version and SHA-256
+  verified before execution.
+- Signing material is destroyed before the artifact helper is invoked, and the
+  publish job rechecks `SHA256SUMS` before creating the GitHub Release.
+- The macOS signing job now uses BSD `/usr/bin/base64 -D` for secret decoding;
+  CI executes that exact decoder syntax so a GNU-only flag cannot break the first
+  real tagged release.
+
 ## [0.1.9] - 2026-08-19
 
 ### Fixed
@@ -93,7 +144,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **macOS 27 (Tahoe) Spotlight typing**: the Spotlight search field is now owned
+- **macOS 26 (Tahoe) Spotlight typing**: the Spotlight search field is now owned
   by the `com.apple.campo` process instead of `com.apple.Spotlight`, so the
   Accessibility atomic-replace path no longer matched and injected backspaces were
   dropped (e.g. "chúng" came out "chuúng"). Spotlight-like fields are now detected
@@ -128,5 +179,6 @@ First macOS release.
   pipeline with drop-in `cases/*.txt` article fixtures, a live end-to-end script,
   and continuous integration.
 
-[Unreleased]: https://github.com/nghialuong/84Key/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/sangtrx/84Key/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/sangtrx/84Key/releases/tag/v0.2.0
 [0.1.0]: https://github.com/nghialuong/84Key/releases/tag/v0.1.0
