@@ -70,7 +70,7 @@ packaging pins its **code-signing identifier explicitly** to
 that identifier back from the signature and fail if it drifts.
 
 A public release additionally requires a **Developer ID Application** signer and
-compares the `TeamIdentifier` of both agent and app against the protected
+compares the `TeamIdentifier` of both agent and app against the
 `DEVELOPER_ID_TEAM_ID` release secret. A notarization credential alone is not
 accepted as proof of the expected signer identity.
 
@@ -89,12 +89,15 @@ reported for every macOS build.
 
 ## Distribution hardening
 
-The release workflow separates privileges and fails closed:
+The release workflow separates privileges and fails closed around the parts that
+directly determine the shipped binary:
 
-- secret-free preflight requires strict semver on the exact current `main`, checks
-  source version, reruns the complete core/security suite, requires `main` to be
-  protected and requires the release tag itself to be a protected ref;
-- build/sign/notarize has repository read-only permission plus protected Apple
+- secret-free preflight requires strict semver on the **exact current `main`**,
+  checks source version, and reruns the complete core/security suite;
+- GitHub branch/tag rulesets are optional for this personal repository; removing
+  that process control does **not** relax exact-main provenance, signing identity,
+  notarization, Gatekeeper, checksum, or runtime/security gates;
+- build/sign/notarize has repository read-only permission plus Apple
   signing/notarization secrets;
 - CI and release are pinned to **Xcode 26.6 build 17F113** and XcodeGen 2.46.0 is
   SHA-256 verified before execution;
