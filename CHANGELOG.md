@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of waking once per second indefinitely while approval is pending.
 - Background-agent status is refreshed whenever the control menu opens or the app
   becomes active, so System Settings approval/revocation is reflected immediately.
+- English auto-detection now uses a byte-pinned CC0 common-word corpus from
+  `dariusk/corpora` plus a separate, sorted SangKey-maintained CC0 supplement.
+  The historical `google-10000-english`-derived payload is removed from the
+  product and repository because its redistribution provenance was not clear
+  enough for a public SangKey release.
 
 ### Security
 
@@ -41,8 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - macOS CI/release toolchain is pinned to Xcode 26.6 build 17F113.
 - Notarized release payloads must pass both `stapler` and Gatekeeper `spctl`
   assessment before publication.
-- DMGs include `LICENSE.txt`, `NOTICE.txt`, and `SOURCE.txt` pointing to the exact
-  corresponding source commit.
+- DMGs include `LICENSE.txt`, `NOTICE.txt`, `THIRD_PARTY_DATA.txt`, and `SOURCE.txt`
+  pointing to reviewed licensing/provenance and the exact corresponding source
+  commit.
+- CI verifies the vendored CC0 corpus by exact Git blob SHA and refuses to track
+  the removed legacy English payload again.
 
 ## [0.3.0] - 2026-08-28
 
@@ -221,8 +229,9 @@ First macOS release.
 - First-run Accessibility onboarding and a warning about conflicts with other
   Vietnamese input methods.
 - Vietnamese-by-Telex syllable dictionary generated from linguistic rules (no
-  external word list); English word list from the public-domain
-  google-10000-english set.
+  external word list); the original 84Key-lineage English detector payload was
+  later replaced before SangKey v0.4.0 because its redistribution provenance was
+  not sufficiently clear for this public distribution.
 - **Privacy**: 100% local processing, no telemetry, no network calls for typing.
 - C++ engine test harness, a keystroke-level simulation of the macOS output
   pipeline with drop-in `cases/*.txt` article fixtures, a live end-to-end script,
