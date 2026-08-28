@@ -3,8 +3,9 @@ import ServiceManagement
 
 /// Thin wrapper over `SMAppService.mainApp` (macOS 13+) that registers /
 /// unregisters 84Key as a Login Item so the menu-bar agent can start at login.
-/// Failures are logged rather than thrown to the caller — a login item that
-/// can't register should never crash the app or block the settings toggle.
+/// The return value is always the *effective* system state after the attempt, so
+/// callers can immediately reconcile a Settings toggle if registration is denied
+/// or still requires user approval.
 enum LoginItemManager {
     /// Whether the app is currently registered to launch at login.
     static var isEnabled: Bool {
@@ -17,8 +18,12 @@ enum LoginItemManager {
     }
 
     /// Register or unregister the main app as a login item to match `enabled`.
-    /// No-ops when the requested state already matches the current status.
-    static func sync(enabled: Bool) {
+    /// Returns the effective state reported by ServiceManagement afterwards.
+    /// Failures are logged rather than thrown: a login-item problem must never
+    /// crash the keyboard process, but the UI must not keep displaying a state
+    /// that macOS rejected.
+    @discardableResult
+    static func sync(enabled: Bool) -> Bool {
         let service = SMAppService.mainApp
         do {
             if enabled {
@@ -39,5 +44,6 @@ enum LoginItemManager {
                   enabled ? "register" : "unregister",
                   error.localizedDescription)
         }
+        return service.status == .enabled
     }
 }
