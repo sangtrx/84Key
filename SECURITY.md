@@ -2,64 +2,68 @@
 
 ## Supported versions
 
-Security fixes are provided for the latest hardened fork release line.
+Security fixes are provided for the latest SangKey release line.
 
 | Version | Supported |
 |---------|-----------|
-| 0.2.x   | ✅        |
+| 0.3.x   | ✅        |
+| 0.2.x   | ❌ pre-SangKey migration |
 | 0.1.x   | ❌ upstream baseline only |
-| < 0.1   | ❌        |
 
 ## Reporting a vulnerability
 
-Please report security issues **privately** rather than opening a public issue.
-Use GitHub Security Advisories for this fork:
-<https://github.com/sangtrx/84Key/security/advisories/new>
+Please report security issues privately through GitHub Security Advisories:
+<https://github.com/sangtrx/SangKey/security/advisories/new>
 
-Include a description, reproduction steps, the affected version/commit, and the
-macOS version. Coordinated disclosure is appreciated.
+Include reproduction steps, affected version/commit, and macOS version.
 
 ## Threat model and privacy
 
-84Key requires macOS **Accessibility** permission because it implements a
-session-level `CGEvent` tap and, for specific system search fields, uses the
-Accessibility API to read/replace the focused field locally. That is a powerful
-permission: the process has the technical capability to observe normal keyboard
-events delivered to its event tap, so the source and distribution chain should
-be treated with the same care as other input software.
+SangKey requires macOS **Accessibility** permission because it implements a
+session-level `CGEvent` tap and, for selected system search fields, uses the
+Accessibility API to read/replace the focused field locally. This is inherently a
+powerful permission, so the runtime and distribution chain are intentionally kept
+small and auditable.
 
-The hardened fork is designed around the following constraints:
+Runtime constraints:
 
-- Typing conversion happens **locally on the Mac**. There is no telemetry,
-  analytics SDK, account system, or typing-data upload path.
-- There is **no embedded auto-updater**. The menu's update command only opens
-  this fork's GitHub Releases page in the default browser after an explicit user
-  action. The app does not download or install executable updates itself.
-- The inherited `KEY84_TRACE` diagnostic path is forcibly disabled at startup
-  before input interception begins, so release users cannot enable per-key
-  diagnostic logging through an environment variable.
-- macOS **Secure Event Input** is the platform boundary for password/secure-input
-  contexts: the event-tap mechanism is restricted by the OS while secure input
-  is active. We do not claim a separate password-field detector implemented by
-  84Key itself.
-- The serialized macro and smart-switch parsers fail closed on truncated length
-  fields and are exercised under ASan/UBSan in CI.
-- This fork uses `com.sangtrx.key84` (and a separate debug bundle id) instead of
-  reusing upstream's bundle identity, keeping code-sign/TCC provenance distinct.
+- Typing conversion stays **local on the Mac**.
+- The always-running host is **Objective-C++ + AppKit + the C++ engine**. There is
+  no Swift, SwiftUI, Combine, ServiceManagement, daemon or XPC helper.
+- There is **no embedded updater** or background network client. The update menu
+  item only opens the SangKey GitHub Releases page after an explicit click.
+- There is no clipboard client, keychain client, telemetry, analytics SDK or
+  typing-data upload path.
+- The inherited `KEY84_TRACE` path is scrubbed before input interception begins.
+- macOS **Secure Event Input** is the platform boundary for secure/password input;
+  SangKey does not claim to implement its own password-field detector.
+- Serialized legacy parsers fail closed on malformed/truncated input and are
+  covered by ASan/UBSan.
+- Release and debug bundle identifiers are `com.sangtrx.sangkey` and
+  `com.sangtrx.sangkey.debug`, keeping TCC/code-sign provenance independent from
+  upstream 84Key.
+
+## Lightweight-runtime gate
+
+CI inspects the final Mach-O using `otool -L`. A build fails if the shipping
+binary links Swift/SwiftUI/Combine or ServiceManagement. The source invariant
+also requires the macOS app host to contain no Swift files and no retained
+settings/onboarding view hierarchy.
 
 ## Distribution hardening
 
-The release workflow intentionally separates privileges:
+The release workflow separates privileges:
 
-- build/sign/notarize has repository **read-only** permission and access to the
-  protected Apple signing/notarization secrets;
-- publish has `contents: write` but **no Apple secrets**;
+- secret-free preflight requires strict semver on the exact current `main`, checks
+  source version, and reruns the complete core/security suite;
+- build/sign/notarize has repository read-only permission plus protected Apple
+  signing/notarization secrets;
+- publish has `contents: write` but no Apple secrets;
 - reusable GitHub Actions are pinned to immutable commit SHAs;
-- XcodeGen is pinned to version 2.46.0 and its release archive is SHA-256 checked
-  before execution;
-- each release publishes the notarized DMG together with `SHA256SUMS`.
+- XcodeGen 2.46.0 is SHA-256 verified before execution;
+- signing material is destroyed before artifact handoff;
+- each release publishes a notarized universal (`arm64` + `x86_64`) DMG together
+  with `SHA256SUMS`.
 
 Apple notarization and Developer ID signing are additional distribution checks,
-not substitutes for source review. CI also enforces source-level security
-invariants so reintroducing an embedded updater, mutable Actions refs, or the
-upstream bundle identity fails the test suite.
+not substitutes for source review.

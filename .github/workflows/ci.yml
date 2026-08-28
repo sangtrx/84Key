@@ -14,7 +14,6 @@ jobs:
     name: Core + security tests
     runs-on: ubuntu-24.04
     steps:
-      # Pin actions by immutable commit SHA, not a mutable major-version tag.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
@@ -39,17 +38,11 @@ jobs:
           sudo xcode-select -s "$XCODE/Contents/Developer"
           xcodebuild -version
 
-      # The release job decodes the Developer ID certificate and ASC key on the
-      # same macOS runner family. Exercise BSD base64's real decode syntax here so
-      # a GNU-only flag cannot survive until the first secret-bearing tag build.
       - name: Smoke-test release credential decoder
         run: |
           set -euo pipefail
-          test "$(printf 'ODRLZXk=' | /usr/bin/base64 -D)" = "84Key"
+          test "$(printf 'U2FuZ0tleQ==' | /usr/bin/base64 -D)" = "SangKey"
 
-      # Download an immutable XcodeGen release asset and verify the digest
-      # published by GitHub before executing it. This avoids executing a mutable
-      # Homebrew formula inside a privileged release/build environment.
       - name: Install verified XcodeGen 2.46.0
         env:
           XCODEGEN_URL: https://github.com/yonaskolb/XcodeGen/releases/download/2.46.0/xcodegen.zip
@@ -71,46 +64,88 @@ jobs:
         working-directory: platform/macos
         run: xcodegen generate
 
-      - name: Build app without code signing
+      - name: Build zero-Swift AppKit host without code signing
         working-directory: platform/macos
         run: |
           set -euo pipefail
           xcodebuild \
-            -project 84Key.xcodeproj \
-            -scheme 84Key \
+            -project SangKey.xcodeproj \
+            -scheme SangKey \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      # Exercise the exact release packaging path without exposing Apple release
-      # credentials. '-' is codesign's ad-hoc identity: it executes the same
-      # signing/verification and DMG creation code, but cannot masquerade as a
-      # distributable Developer ID build. Release artifacts are required to be
-      # universal so the documented macOS 14+ support does not silently exclude
-      # Intel Macs just because GitHub's macOS 26 runner is arm64.
+      - name: Verify ultra-light runtime linkage and idle footprint
+        run: |
+          set -euo pipefail
+          APP=$(find "$HOME/Library/Developer/Xcode/DerivedData" -path '*/Build/Products/Debug/SangKey (DEV).app' -print -quit)
+          test -n "$APP"
+          ENTRY="$APP/Contents/MacOS/SangKey (DEV)"
+          REAL="$APP/Contents/MacOS/SangKey (DEV).debug.dylib"
+          test -x "$ENTRY"
+          test -f "$REAL"
+
+          echo "== real debug payload linked images =="
+          otool -L "$REAL"
+          if otool -L "$REAL" | grep -Eqi 'SwiftUI|Combine|/libswift|ServiceManagement'; then
+            echo "ERROR: SangKey linked Swift/SwiftUI/Combine/ServiceManagement runtime machinery" >&2
+            exit 1
+          fi
+          test ! -e "$APP/Contents/Resources/EngineUpstream.inc"
+          test -z "$(find platform/macos/App platform/macos/Bridge -type f -name '*.swift' -print 2>/dev/null || true)"
+
+          echo "== static footprint =="
+          APP_KIB=$(du -sk "$APP" | awk '{print $1}')
+          REAL_BYTES=$(stat -f '%z' "$REAL")
+          echo "Debug app: ${APP_KIB} KiB"
+          echo "Debug real payload: ${REAL_BYTES} bytes"
+
+          echo "== idle footprint smoke =="
+          LOG="$RUNNER_TEMP/sangkey-idle.log"
+          SANGKEY_CI_SMOKE=1 "$ENTRY" >"$LOG" 2>&1 &
+          PID=$!
+          trap 'kill "$PID" 2>/dev/null || true' EXIT
+          sleep 3
+          if ! kill -0 "$PID" 2>/dev/null; then
+            cat "$LOG"
+            echo "ERROR: SangKey exited during idle footprint smoke" >&2
+            exit 1
+          fi
+          RSS_KIB=$(ps -o rss= -p "$PID" | awk '{print $1}')
+          CPU_PCT=$(ps -o %cpu= -p "$PID" | awk '{print $1}')
+          test -n "$RSS_KIB"
+          echo "SangKey idle RSS with status menu + dictionaries: ${RSS_KIB} KiB"
+          echo "SangKey idle CPU snapshot: ${CPU_PCT}%"
+          kill "$PID"
+          wait "$PID" || true
+          trap - EXIT
+
       - name: Smoke-test universal Release DMG packaging
         env:
           CODESIGN_IDENTITY: '-'
-          KEY84_VERSION: '0.2.0'
-          KEY84_ARCHS: 'arm64 x86_64'
+          SANGKEY_VERSION: '0.3.0'
+          SANGKEY_ARCHS: 'arm64 x86_64'
           CONFIG: Release
         run: |
           set -euo pipefail
           bash tools/package.sh
 
-          APP="build/dd/Build/Products/Release/84Key.app"
-          BIN="$APP/Contents/MacOS/84Key"
-          DMG="build/84Key.dmg"
+          APP="build/dd/Build/Products/Release/SangKey.app"
+          BIN="$APP/Contents/MacOS/SangKey"
+          DMG="build/SangKey.dmg"
           test -d "$APP"
           test -f "$DMG"
           test ! -e "$APP/Contents/Frameworks/Sparkle.framework"
           test ! -e "$APP/Contents/Resources/EngineUpstream.inc"
-
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" = "com.sangtrx.key84"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "0.2.0"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" = "com.sangtrx.sangkey"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "0.3.0"
           lipo "$BIN" -verify_arch arm64 x86_64
+          if otool -L "$BIN" | grep -Eqi 'SwiftUI|Combine|/libswift|ServiceManagement'; then
+            echo "ERROR: Release binary linked non-minimal runtime machinery" >&2
+            exit 1
+          fi
           echo "Release architectures: $(lipo "$BIN" -archs)"
-
+          echo "Release footprint: $(du -sk "$APP" | awk '{print $1}') KiB app; $(stat -f '%z' "$BIN") byte universal binary"
           codesign --verify --strict --verbose=2 "$APP"
           codesign --verify --verbose=2 "$DMG"
           hdiutil verify "$DMG"

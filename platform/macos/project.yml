@@ -1,4 +1,4 @@
-name: 84Key
+name: SangKey
 options:
   bundleIdPrefix: com.sangtrx
   deploymentTarget:
@@ -10,69 +10,55 @@ settings:
     CLANG_CXX_LANGUAGE_STANDARD: "c++14"
     CLANG_CXX_LIBRARY: "libc++"
     CLANG_ENABLE_OBJC_ARC: YES
-    SWIFT_VERSION: "5.0"
 
 targets:
-  84Key:
+  SangKey:
     type: application
     platform: macOS
     sources:
-      - path: App
+      # Absolute-minimum macOS host: one Objective-C++ AppKit status-menu entry
+      # point plus the Objective-C++ event tap. No Swift/SwiftUI/Combine target.
+      - path: App/SangKeyApp.mm
       - path: Input
-      - path: Bridge
       - path: ../../core/engine
         name: Engine
-        # EngineUpstream.inc is compile-time implementation included by Engine.cpp.
-        # XcodeGen otherwise treats the unknown .inc extension as a resource and
-        # copies the full legacy source into the shipped application bundle.
         excludes:
           - EngineUpstream.inc
-      # Bundled dictionaries for automatic English detection (Copy Bundle Resources).
       - path: ../../core/data/english_words.dat
         buildPhase: resources
       - path: ../../core/data/viet_telex.dat
         buildPhase: resources
-      # App icon + image assets. Source of truth lives in the repo (not the
-      # generated .xcodeproj); compiled into Assets.car at build time.
       - path: Resources/Assets.xcassets
         buildPhase: resources
     dependencies:
-      # Carbon provides Text Input Source APIs and Secure Event Input behavior.
+      - sdk: AppKit.framework
+      - sdk: ApplicationServices.framework
       - sdk: Carbon.framework
-      # ServiceManagement provides SMAppService for the opt-in run-at-login feature.
-      - sdk: ServiceManagement.framework
     settings:
       base:
-        PRODUCT_NAME: "84Key"
-        PRODUCT_MODULE_NAME: "Key84"
-        # The hardened fork deliberately uses its own identity. Sharing the
-        # upstream bundle id across different signing teams creates confusing TCC
-        # grants and makes provenance harder to reason about.
-        PRODUCT_BUNDLE_IDENTIFIER: com.sangtrx.key84
+        PRODUCT_NAME: "SangKey"
+        PRODUCT_BUNDLE_IDENTIFIER: com.sangtrx.sangkey
         INFOPLIST_FILE: Resources/Info.plist
-        SWIFT_OBJC_BRIDGING_HEADER: Bridge/Key84-Bridging-Header.h
-        MARKETING_VERSION: "0.2.0"
-        CURRENT_PROJECT_VERSION: "12"
+        MARKETING_VERSION: "0.3.0"
+        CURRENT_PROJECT_VERSION: "13"
         GENERATE_INFOPLIST_FILE: NO
         ENABLE_HARDENED_RUNTIME: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: NO
         HEADER_SEARCH_PATHS:
           - "$(SRCROOT)/Input"
-          - "$(SRCROOT)/Bridge"
           - "$(SRCROOT)/../../core/engine"
       configs:
-        # Debug runs as a distinct app so its Accessibility grant cannot be
-        # confused with the signed release build.
         Debug:
-          PRODUCT_NAME: "84Key (DEV)"
-          PRODUCT_BUNDLE_IDENTIFIER: com.sangtrx.key84.debug
+          PRODUCT_NAME: "SangKey (DEV)"
+          PRODUCT_BUNDLE_IDENTIFIER: com.sangtrx.sangkey.debug
           ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon-Dev
 
 schemes:
-  84Key:
+  SangKey:
     build:
       targets:
-        84Key: all
+        SangKey: all
     run:
       config: Debug
     test:
