@@ -73,3 +73,30 @@ jobs:
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+      # Exercise the exact release packaging path without exposing Apple release
+      # credentials. '-' is codesign's ad-hoc identity: it executes the same
+      # signing/verification and DMG creation code, but cannot masquerade as a
+      # distributable Developer ID build.
+      - name: Smoke-test Release DMG packaging
+        env:
+          CODESIGN_IDENTITY: '-'
+          KEY84_VERSION: '0.2.0'
+          CONFIG: Release
+        run: |
+          set -euo pipefail
+          bash tools/package.sh
+
+          APP="build/dd/Build/Products/Release/84Key.app"
+          DMG="build/84Key.dmg"
+          test -d "$APP"
+          test -f "$DMG"
+          test ! -e "$APP/Contents/Frameworks/Sparkle.framework"
+
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" = "com.sangtrx.key84"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "0.2.0"
+
+          codesign --verify --strict --verbose=2 "$APP"
+          codesign --verify --verbose=2 "$DMG"
+          hdiutil verify "$DMG"
+          shasum -a 256 "$DMG"
