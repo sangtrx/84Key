@@ -17,14 +17,26 @@ SIM="${TMPDIR:-/tmp}/key84_typing_sim"
 c++ -std=c++14 -O2 -o "$SIM" typing_sim_test.cpp $ENGINE_SRC
 "$SIM"
 
+# Drive the real typing paths under ASan/UBSan too. Parser-only sanitization is
+# not enough for a legacy input engine: normal typing exercises state-history,
+# alternate-spelling and restore paths that malformed-file tests never touch.
+SAN_FLAGS=(-std=c++14 -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined)
+SAN_ENV=(ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1)
+
+SAN_ENGINE="${TMPDIR:-/tmp}/key84_engine_test_san"
+c++ "${SAN_FLAGS[@]}" -o "$SAN_ENGINE" engine_test.cpp $ENGINE_SRC
+env "${SAN_ENV[@]}" "$SAN_ENGINE"
+
+SAN_SIM="${TMPDIR:-/tmp}/key84_typing_sim_san"
+c++ "${SAN_FLAGS[@]}" -o "$SAN_SIM" typing_sim_test.cpp $ENGINE_SRC
+env "${SAN_ENV[@]}" "$SAN_SIM"
+
 # Security regression coverage for serialized OpenKey parsers. Sanitizers are
 # intentional here: malformed length fields used to produce reads past the end
 # of attacker-controlled buffers before the macOS UI even exposed import paths.
 PARSER="${TMPDIR:-/tmp}/key84_parser_safety_test"
-c++ -std=c++14 -O1 -g -fno-omit-frame-pointer \
-    -fsanitize=address,undefined \
-    -o "$PARSER" parser_safety_test.cpp $ENGINE_SRC
-ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 "$PARSER"
+c++ "${SAN_FLAGS[@]}" -o "$PARSER" parser_safety_test.cpp $ENGINE_SRC
+env "${SAN_ENV[@]}" "$PARSER"
 
 # Invariants of the macOS send layer (source-level — nothing here can call
 # CGEvent, and the properties they guard only fail under load in a real app).
