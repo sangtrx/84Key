@@ -121,11 +121,20 @@ jobs:
           bash tools/package.sh
           APP="build/dd/Build/Products/Release/SangKey.app"
           BIN="$APP/Contents/MacOS/SangKey"
+          AGENT="$APP/Contents/Resources/SangKeyAgent"
+          AGENT_PLIST="$APP/Contents/Library/LaunchAgents/com.sangtrx.sangkey.agent.plist"
+          test -x "$AGENT"
+          test -f "$AGENT_PLIST"
+          plutil -lint "$AGENT_PLIST"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :BundleProgram' "$AGENT_PLIST")" = 'Contents/Resources/SangKeyAgent'
           lipo "$BIN" -verify_arch arm64 x86_64
-          if otool -L "$BIN" | grep -Eq '/(SwiftUI|Combine)\.framework/'; then
-            echo "ERROR: release binary linked SwiftUI or Combine" >&2
+          lipo "$AGENT" -verify_arch arm64 x86_64
+          if otool -L "$AGENT" | grep -Eqi 'AppKit|SwiftUI|Combine|/libswift|ServiceManagement'; then
+            echo "ERROR: release agent linked UI/Swift/login-item machinery" >&2
             exit 1
           fi
+          codesign --verify --strict --verbose=2 "$AGENT"
+          codesign --verify --deep --strict --verbose=2 "$APP"
           DMG="SangKey-${GITHUB_REF_NAME}.dmg"
           mv build/SangKey.dmg "build/$DMG"
           test ! -e "$APP/Contents/Frameworks/Sparkle.framework"
