@@ -90,10 +90,12 @@ Delete local credential exports afterward.
 - both `TeamIdentifier` values equal `DEVELOPER_ID_TEAM_ID`;
 - nested agent is signed before the enclosing app;
 - app and agent signatures verify;
+- production English detector corpus files are present and match their reviewed
+  byte-pinned Git blob SHAs in the built app and mounted DMG;
 - DMG is notarized and stapled;
 - DMG and mounted app pass Gatekeeper `spctl` assessment;
-- DMG includes `LICENSE.txt`, `NOTICE.txt`, and `SOURCE.txt` pointing at the exact
-  corresponding-source commit;
+- DMG includes `LICENSE.txt`, `NOTICE.txt`, `THIRD_PARTY_DATA.txt`, and
+  `SOURCE.txt` pointing at the exact corresponding-source commit;
 - final `SHA256SUMS` is produced only after those checks.
 
 ### Publish
@@ -112,21 +114,23 @@ Test the exact notarized DMG produced by `build-sign-notarize`, preferably on a
 Mac/user account without an existing SangKey registration:
 
 1. Verify `SHA256SUMS` and `xcrun stapler validate`.
-2. Install `SangKey.app` into `/Applications`.
-3. Launch it once and enable the bundled background input agent.
-4. If macOS reports approval required, approve it under **General → Login Items**.
-5. Grant **Accessibility** to the actual `SangKeyAgent` identity.
-6. Confirm Telex, VNI, English auto-detection, VI/EN hotkey, Spotlight and browser
+2. Mount the DMG and inspect `THIRD_PARTY_DATA.txt` plus `SOURCE.txt` before
+   installation.
+3. Install `SangKey.app` into `/Applications`.
+4. Launch it once and enable the bundled background input agent.
+5. If macOS reports approval required, approve it under **General → Login Items**.
+6. Grant **Accessibility** to the actual `SangKeyAgent` identity.
+7. Confirm Telex, VNI, English auto-detection, VI/EN hotkey, Spotlight and browser
    compatibility behavior in representative apps.
-7. Close `SangKey.app`; typing must continue while the AppKit control process is
+8. Close `SangKey.app`; typing must continue while the AppKit control process is
    gone.
-8. Log out/in or reboot; the registered agent must return without reopening the
+9. Log out/in or reboot; the registered agent must return without reopening the
    control app.
-9. Reopen the control app and confirm background-agent status reflects System
-   Settings accurately.
-10. Disable the agent, close/reopen the control app, and confirm it remains
+10. Reopen the control app and confirm background-agent status reflects System
+    Settings accurately.
+11. Disable the agent, close/reopen the control app, and confirm it remains
     disabled. Re-enable and verify typing returns.
-11. Replace the installed app with the same signed candidate again and confirm
+12. Replace the installed app with the same signed candidate again and confirm
     Accessibility/code identity remains stable.
 
 If any step fails, **do not approve the publish job**. Fix on `main` and cut the
@@ -178,11 +182,13 @@ spctl -a -vv --type execute "$APP"
 lipo "$APP/Contents/MacOS/SangKey" -archs
 lipo "$AGENT" -archs
 otool -L "$AGENT"
+cat /Volumes/SangKey/THIRD_PARTY_DATA.txt
 cat /Volumes/SangKey/SOURCE.txt
 ```
 
 Confirm the app ID, agent ID, expected Team ID, universal architectures, no heavy
-agent linkage, notarization, Gatekeeper result and exact source URL.
+agent linkage, English corpus provenance, notarization, Gatekeeper result and exact
+source URL.
 
 ## 7. Local packaging
 
