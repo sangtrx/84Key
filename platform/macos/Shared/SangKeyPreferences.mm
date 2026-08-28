@@ -8,6 +8,7 @@ NSDictionary<NSString *, NSNumber *> *SangKeyDefaultPreferences(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         defaults = @{
+            @"agentDesiredEnabled": @1,
             @"vLanguage": @1,
             @"vInputType": @0,
             @"vCodeTable": @0,
