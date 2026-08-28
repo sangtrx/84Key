@@ -3,10 +3,11 @@ name: Release
 # Security model:
 #   1. Build/sign/notarize runs with read-only repository permission and the
 #      protected `release` environment secrets.
-#   2. The signed artifact is handed to a separate publish job that has no Apple
+#   2. Signing material is destroyed before any artifact-upload action runs.
+#   3. The signed artifact is handed to a separate publish job that has no Apple
 #      credentials and receives the short-lived contents:write token.
-#   3. Every reusable action is pinned to an immutable commit SHA.
-#   4. XcodeGen is downloaded at an exact version and SHA-256 verified before use.
+#   4. Every reusable action is pinned to an immutable commit SHA.
+#   5. XcodeGen is downloaded at an exact version and SHA-256 verified before use.
 #
 # This fork intentionally has no in-app auto-updater or appcast.
 on:
@@ -107,6 +108,14 @@ jobs:
             shasum -a 256 -c SHA256SUMS
           )
 
+      # Destroy credentials before invoking even a pinned artifact helper. If the
+      # build fails this still runs; subsequent normal steps remain skipped.
+      - name: Clean up signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/build.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/asc.p8" "$RUNNER_TEMP/devid.p12" "$RUNNER_TEMP/xcodegen.zip"
+
       - name: Upload notarized release payload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -116,12 +125,6 @@ jobs:
             build/SHA256SUMS
           if-no-files-found: error
           retention-days: 1
-
-      - name: Clean up signing material
-        if: always()
-        run: |
-          security delete-keychain "$RUNNER_TEMP/build.keychain-db" 2>/dev/null || true
-          rm -f "$RUNNER_TEMP/asc.p8" "$RUNNER_TEMP/devid.p12" "$RUNNER_TEMP/xcodegen.zip"
 
   publish:
     name: Publish GitHub Release
@@ -141,7 +144,7 @@ jobs:
         working-directory: dist
         run: shasum -a 256 -c SHA256SUMS
 
-      - name: Publish immutable release payload
+      - name: Publish release payload
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
