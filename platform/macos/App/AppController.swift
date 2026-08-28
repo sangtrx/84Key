@@ -38,10 +38,23 @@ final class AppController: ObservableObject {
         let dictsLoaded = input.loadDictionaries()
         NSLog("84Key dictionaries loaded = %@", dictsLoaded ? "YES" : "NO")
 
-        LoginItemManager.sync(enabled: settings.runOnStartup)
+        // ServiceManagement is the authority, not the persisted checkbox. A
+        // registration attempt can fail (or require approval), so immediately
+        // fold the effective state back into AppSettings instead of leaving a
+        // lying ON toggle. The second emission after reconciliation is harmless:
+        // `sync` sees the already-effective state and no-ops.
+        let effectiveLoginState = LoginItemManager.sync(enabled: settings.runOnStartup)
+        if settings.runOnStartup != effectiveLoginState {
+            settings.runOnStartup = effectiveLoginState
+        }
         loginObserver = settings.$runOnStartup
             .dropFirst()
-            .sink { LoginItemManager.sync(enabled: $0) }
+            .sink { requested in
+                let effective = LoginItemManager.sync(enabled: requested)
+                if AppSettings.shared.runOnStartup != effective {
+                    AppSettings.shared.runOnStartup = effective
+                }
+            }
 
         // Mirror hotkey-driven VI/EN toggles (from the global event tap) back into
         // AppSettings so the menu-bar label and Settings reflect the change. Posted
@@ -65,6 +78,13 @@ final class AppController: ObservableObject {
     func shutdown() {
         pollTimer?.invalidate()
         pollTimer = nil
+        loginObserver = nil
+        if let langObserver {
+            NotificationCenter.default.removeObserver(langObserver)
+            self.langObserver = nil
+        }
+        onboarding?.dismiss()
+        onboarding = nil
         input.stop()
     }
 
