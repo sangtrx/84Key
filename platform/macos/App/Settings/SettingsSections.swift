@@ -214,6 +214,10 @@ private struct CompatibilityPage: View {
         Form {
             Section("Ứng dụng") {
                 Toggle("Dùng gõ tắt (text expansion)", isOn: $settings.useMacro)
+                Toggle(isOn: $settings.fixWebContentEditor) {
+                    Text("Ổn định khi gõ trong trình duyệt / web editor")
+                    Text("Dùng đường xử lý có nhịp cho Chrome, Edge, Firefox, Google Docs và các trình duyệt tương tự. Tắt nếu một web app cụ thể bị lỗi.")
+                }
                 Toggle(isOn: $settings.fixRecommendBrowser) {
                     Text("Sửa lỗi gợi ý trên thanh địa chỉ trình duyệt")
                     Text("Chỉ bật nếu bạn gặp lỗi gợi ý hoặc ký tự lạ trong thanh địa chỉ.")
@@ -299,10 +303,11 @@ private struct AdvancedPage: View {
 // MARK: - 9. Giới thiệu
 
 private struct AboutPage: View {
-    private let repoURL    = URL(string: "https://github.com/nghialuong/84Key")!
-    private let authorURL  = URL(string: "https://github.com/nghialuong")!
-    private let openKeyURL = URL(string: "https://github.com/tuyenvm/OpenKey")!
-    private let wordsURL   = URL(string: "https://github.com/first20hours/google-10000-english")!
+    private let forkURL     = URL(string: "https://github.com/sangtrx/84Key")!
+    private let upstreamURL = URL(string: "https://github.com/nghialuong/84Key")!
+    private let authorURL   = URL(string: "https://github.com/nghialuong")!
+    private let openKeyURL  = URL(string: "https://github.com/tuyenvm/OpenKey")!
+    private let wordsURL    = URL(string: "https://github.com/first20hours/google-10000-english")!
 
     var body: some View {
         Form {
@@ -320,10 +325,13 @@ private struct AboutPage: View {
             .listRowBackground(Color.clear)
 
             Section("Liên kết") {
-                LabeledContent("Mã nguồn") {
-                    Link("github.com/nghialuong/84Key", destination: repoURL)
+                LabeledContent("Mã nguồn bản hardened") {
+                    Link("github.com/sangtrx/84Key", destination: forkURL)
                 }
-                LabeledContent("Tác giả") {
+                LabeledContent("Dự án 84Key gốc") {
+                    Link("github.com/nghialuong/84Key", destination: upstreamURL)
+                }
+                LabeledContent("Tác giả dự án gốc") {
                     Link("nghialuong", destination: authorURL)
                 }
             }
@@ -343,10 +351,9 @@ private struct AboutPage: View {
                    + "84Key được phát hành theo giấy phép GPLv3.")
             }
 
-            // Closing line, centered, with a brand-pink heart.
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
-                (Text("Phát triển bởi nghialuong với tất cả trái tim ")
+                (Text("Bản hardened tiếp tục từ 84Key của nghialuong ")
                  + Text(Image(systemName: "heart.fill")).foregroundColor(Key84DS.Color.accent))
                     .font(.callout)
                     .foregroundStyle(.secondary)
