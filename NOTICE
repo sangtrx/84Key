@@ -1,5 +1,5 @@
-84Key
-Copyright (c) 2026 The 84Key Authors
+84Key hardened fork
+Copyright (c) 2026 The 84Key Authors and contributors
 
 This software is licensed under the GNU General Public License version 3
 (GPLv3). See the LICENSE file for the full license text.
@@ -15,14 +15,9 @@ also distributed under GPLv3. We gratefully acknowledge the OpenKey
 project for the core typing logic that makes accurate Vietnamese input
 possible.
 
-
-Third-party software
---------------------
-
-1. Sparkle
-   Source: https://github.com/sparkle-project/Sparkle
-   License: MIT (with a BSD-licensed bundled bsdiff).
-   Provides 84Key's in-app auto-update (appcast + signed update install).
+This hardened fork is derived from nghialuong/84Key
+(https://github.com/nghialuong/84Key). Existing copyright and GPLv3
+obligations from that project are preserved.
 
 
 Third-party data
@@ -40,6 +35,12 @@ Third-party data
    not incorporate, any external or scraped word list.
 
 
-All other code in this repository, including the SwiftUI macOS
-application, is original work by The 84Key Authors and is licensed
-under GPLv3.
+Distribution note
+-----------------
+
+The hardened fork does not embed Sparkle or another in-app updater. The
+menu update command opens the fork's GitHub Releases page only after an
+explicit user action. Release-build tooling such as XcodeGen is not
+linked into the application and is covered by its own upstream license.
+
+All fork changes are distributed under GPLv3.
