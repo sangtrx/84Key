@@ -10,28 +10,48 @@
 #include <map>
 #include <iostream>
 #include <memory.h>
+#include <cstddef>
 
 //main data, i use `map` because it has O(Log(n))
 static map<string, Int8> _smartSwitchKeyData;
 static string _cacheKey = ""; //use cache for faster
 static Int8 _cacheData = 0; //use cache for faster
 
+static bool canReadSmartSwitch(const size_t cursor, const size_t length, const size_t totalSize) {
+    return cursor <= totalSize && length <= totalSize - cursor;
+}
+
 void initSmartSwitchKey(const Byte* pData, const int& size) {
     _smartSwitchKeyData.clear();
-    if (pData == NULL) return;
+    _cacheKey.clear();
+    _cacheData = 0;
+    if (pData == NULL || size < 2)
+        return;
+
+    const size_t totalSize = static_cast<size_t>(size);
+    size_t cursor = 0;
     Uint16 count = 0;
-    Uint32 cursor = 0;
-    if (size >= 2) {
-        memcpy(&count, pData + cursor, 2);
-        cursor+=2;
-    }
-    Uint8 bundleIdSize;
-    Uint8 value;
-    for (int i = 0; i < count; i++) {
-        bundleIdSize = pData[cursor++];
-        string bundleId((char*)pData + cursor, bundleIdSize);
+    memcpy(&count, pData + cursor, sizeof(count));
+    cursor += sizeof(count);
+
+    for (Uint16 i = 0; i < count; i++) {
+        if (!canReadSmartSwitch(cursor, sizeof(Uint8), totalSize)) {
+            _smartSwitchKeyData.clear();
+            return;
+        }
+        const Uint8 bundleIdSize = pData[cursor++];
+        if (!canReadSmartSwitch(cursor, bundleIdSize, totalSize)) {
+            _smartSwitchKeyData.clear();
+            return;
+        }
+        string bundleId(reinterpret_cast<const char*>(pData + cursor), bundleIdSize);
         cursor += bundleIdSize;
-        value = pData[cursor++];
+
+        if (!canReadSmartSwitch(cursor, sizeof(Uint8), totalSize)) {
+            _smartSwitchKeyData.clear();
+            return;
+        }
+        const Uint8 value = pData[cursor++];
         _smartSwitchKeyData[bundleId] = value;
     }
 }
