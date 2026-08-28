@@ -43,7 +43,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         inputType.addItems(withTitles: ["Telex", "VNI", "Simple Telex 1", "Simple Telex 2"])
         inputType.target = self
         inputType.action = #selector(inputTypeChanged)
-
         let inputRow = row(label: "Kiểu gõ", control: inputType)
 
         for button in [autoDetect, spelling, modern, spotlight, webEditor, startup] {
@@ -68,22 +67,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         actions.alignment = .centerY
 
         let stack = NSStackView(views: [
-            title,
-            subtitle,
-            separator(),
-            inputRow,
-            autoDetect,
-            spelling,
-            modern,
-            separator(),
-            spotlight,
-            webEditor,
-            separator(),
-            startup,
-            shortcutRow,
-            separator(),
-            privacy,
-            actions,
+            title, subtitle, separator(), inputRow, autoDetect, spelling, modern,
+            separator(), spotlight, webEditor, separator(), startup, shortcutRow,
+            separator(), privacy, actions,
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -130,9 +116,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         let shortcutIndex: Int
         switch settings.switchKey {
-        case 0x531: shortcutIndex = 0       // control + command + space
-        case 0x131: shortcutIndex = 1       // control + space
-        case 0xCFF: shortcutIndex = 2       // shift + command, modifier-only
+        case 0x531: shortcutIndex = 0
+        case 0x131: shortcutIndex = 1
+        case 0xCFF: shortcutIndex = 2
         case 0: shortcutIndex = 3
         default: shortcutIndex = 0
         }
@@ -145,16 +131,19 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func toggleChanged(_ sender: NSButton) {
         let on = sender.state == .on
-        switch sender {
-        case autoDetect: settings.autoDetectEnglish = on
-        case spelling: settings.checkSpelling = on
-        case modern: settings.modernOrthography = on
-        case spotlight: settings.fixSpotlight = on
-        case webEditor: settings.fixWebContentEditor = on
-        case startup:
+        if sender === autoDetect {
+            settings.autoDetectEnglish = on
+        } else if sender === spelling {
+            settings.checkSpelling = on
+        } else if sender === modern {
+            settings.modernOrthography = on
+        } else if sender === spotlight {
+            settings.fixSpotlight = on
+        } else if sender === webEditor {
+            settings.fixWebContentEditor = on
+        } else if sender === startup {
             let effective = settings.setRunOnStartup(on)
             startup.state = effective ? .on : .off
-        default: break
         }
     }
 
