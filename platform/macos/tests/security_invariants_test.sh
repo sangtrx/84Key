@@ -216,18 +216,20 @@ else
 fi
 
 # 19. Fork-specific token-boundary behavior lives in a deliberately tiny overlay,
-#     while the imported OpenKey implementation is byte-for-byte pinned. This
-#     makes it obvious in review when a future change modifies legacy engine logic
-#     instead of the auditable boundary policy. The behavioral harness separately
-#     proves that Telex digits are boundaries and VNI digits remain modifiers.
+#     while the imported OpenKey implementation is byte-for-byte pinned. The
+#     canonical typing simulator gates Telex/Simple-Telex alphanumeric tokens and
+#     runs again under ASan/UBSan; the engine harness independently gates VNI's
+#     numeric modifier semantics (including a61 -> ấ).
 EXPECTED_ENGINE_BLOB=31ed888056436edeb13145c309392b0642f88e7c
 if [ "$(git hash-object core/engine/EngineUpstream.inc)" = "$EXPECTED_ENGINE_BLOB" ] && \
    grep -q '#include "EngineUpstream.inc"' core/engine/Engine.cpp && \
    grep -q 'vInputType != vVNI' core/engine/Engine.cpp && \
-   grep -q 'alphanumeric_boundary_test.cpp' core/tests/run_tests.sh; then
-  ok "legacy engine bytes are pinned behind a tested Telex/VNI boundary overlay"
+   grep -q 'dashboard1 ok => dashboard1 ok' core/tests/cases/backspace_restore.txt && \
+   grep -q 'sha256 ok => sha256 ok' core/tests/cases/backspace_restore.txt && \
+   grep -q 'expectEq(st, "J7", "a61", "ấ")' core/tests/engine_test.cpp; then
+  ok "legacy engine bytes are pinned behind canonical Telex/VNI boundary gates"
 else
-  bad "engine overlay provenance or alphanumeric boundary gate changed unexpectedly"
+  bad "engine overlay provenance or alphanumeric/VNI boundary gate changed unexpectedly"
 fi
 
 echo
