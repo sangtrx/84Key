@@ -19,6 +19,13 @@ SIM="${TMPDIR:-/tmp}/key84_typing_sim"
 c++ -std=c++14 -O2 -o "$SIM" typing_sim_test.cpp $ENGINE_SRC
 "$SIM"
 
+# Caps Lock is capsStatus=2 on macOS: letters become uppercase but number-row
+# digits remain digits. Gate that Telex still ends/restores at the digit while
+# VNI keeps 1-9 as tone/vowel modifiers.
+CAPS="${TMPDIR:-/tmp}/key84_capslock_digit_test"
+c++ -std=c++14 -O2 -o "$CAPS" capslock_digit_boundary_test.cpp $ENGINE_SRC
+"$CAPS"
+
 # Drive the real typing paths under ASan/UBSan too. Parser-only sanitization is
 # not enough for a legacy input engine: normal typing exercises state-history,
 # alternate-spelling and restore paths that malformed-file tests never touch.
@@ -32,6 +39,10 @@ env "${SAN_ENV[@]}" "$SAN_ENGINE"
 SAN_SIM="${TMPDIR:-/tmp}/key84_typing_sim_san"
 c++ "${SAN_FLAGS[@]}" -o "$SAN_SIM" typing_sim_test.cpp $ENGINE_SRC
 env "${SAN_ENV[@]}" "$SAN_SIM"
+
+SAN_CAPS="${TMPDIR:-/tmp}/key84_capslock_digit_test_san"
+c++ "${SAN_FLAGS[@]}" -o "$SAN_CAPS" capslock_digit_boundary_test.cpp $ENGINE_SRC
+env "${SAN_ENV[@]}" "$SAN_CAPS"
 
 # Security regression coverage for serialized OpenKey parsers. Sanitizers are
 # intentional here: malformed length fields used to produce reads past the end
