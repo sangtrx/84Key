@@ -58,10 +58,12 @@ static NSString * const kRepoReleases = @"https://github.com/sangtrx/SangKey/rel
                     object:nil
                      queue:[NSOperationQueue mainQueue]
                 usingBlock:^(NSNotification *note) {
+        SangKeyAppDelegate *strongSelf = weakSelf;
+        if (strongSelf == nil) return;
         NSNumber *language = note.userInfo[@"language"];
         if (language != nil) {
-            [weakSelf->_defaults setInteger:language.integerValue forKey:@"vLanguage"];
-            [weakSelf rebuildMenu];
+            [strongSelf->_defaults setInteger:language.integerValue forKey:@"vLanguage"];
+            [strongSelf rebuildMenu];
         }
     }];
 
