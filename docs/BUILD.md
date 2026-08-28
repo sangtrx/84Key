@@ -1,11 +1,15 @@
-# Building 84Key
+# Building SangKey
 
 ## Prerequisites
 
-- macOS with **Xcode** (command-line tools included).
-- **XcodeGen**: `brew install xcodegen` — generates `84Key.xcodeproj` from
+- macOS 14+ with **Xcode 26.x** (command-line tools included).
+- **XcodeGen 2.46.0** to generate `SangKey.xcodeproj` from
   `platform/macos/project.yml`.
-- Python 3 (only to regenerate the dictionaries).
+- Python 3 only if you intentionally regenerate dictionaries.
+
+CI does not install XcodeGen through Homebrew. It downloads the exact 2.46.0
+release archive and verifies SHA-256 before execution. Local development may use
+your preferred installation method, but keep the version aligned with CI.
 
 ## Engine tests
 
@@ -15,56 +19,71 @@ The engine is plain C++14 and builds/runs anywhere:
 bash core/tests/run_tests.sh
 ```
 
-This compiles `core/engine/*.cpp` with the harness and asserts the Vietnamese
-typing, English-detection and option cases. It also runs the keystroke
-simulation of the macOS output pipeline. It exits non-zero on any failure and is
-the gate used in CI. For the full testing story — including drop-in article
-fixtures (`core/tests/cases/*.txt`) and the live end-to-end check — see
-[`TESTING.md`](TESTING.md).
+This runs the engine harness, typing simulation, ASan/UBSan parser checks,
+send-layer invariants and SangKey distribution/security invariants. It exits
+non-zero on any failure and is the same gate used by release preflight.
 
-## macOS app
+For fixture-based and live testing details, see [`TESTING.md`](TESTING.md).
 
-```sh
-cd platform/macos
-xcodegen generate
-xcodebuild -scheme 84Key -configuration Debug CODE_SIGNING_ALLOWED=NO build
+## macOS split runtime
+
+SangKey v0.4 builds two products from one Xcode scheme:
+
+```text
+SangKey.app
+  control menu: AppKit + ServiceManagement
+  Contents/Resources/SangKeyAgent
+  Contents/Library/LaunchAgents/com.sangtrx.sangkey.agent.plist
+
+SangKeyAgent
+  Foundation + ApplicationServices + Carbon + Security
+  InputController + C++ engine + dictionaries
+  no AppKit / ServiceManagement / Swift
 ```
 
-The committed `84Key.xcodeproj` can be opened in Xcode directly; regenerate it
-whenever you change `project.yml`.
-
-To run the app, build it in Xcode and launch, or open the built `.app`. On first
-launch 84Key asks for **Accessibility** permission (System Settings → Privacy &
-Security → Accessibility). Disable other Vietnamese input methods (OpenKey, EVKey,
-the built-in macOS Vietnamese source) to avoid conflicts.
-
-### Testing a dev build next to an installed release
-
-The Debug configuration builds as a **separate app** — bundle id
-`com.nghialuong.key84.debug`, named **"84Key Dev"** — so it gets its own
-Accessibility entry and its own settings, without disturbing an installed
-release. Only one Vietnamese IME can run at a time, so **quit the release before
-launching the Dev build** (and vice-versa); two taps transforming the same keys
-produce garbage.
-
-For the Accessibility grant to persist across rebuilds, sign the Dev build with a
-real (non-ad-hoc) Apple Development certificate — TCC then keys on the team +
-bundle id instead of a per-build hash. Substitute your own team id (the cert's OU,
-shown by `security find-identity -v -p codesigning`):
+Build both:
 
 ```sh
 cd platform/macos
 xcodegen generate
-xcodebuild -scheme 84Key -configuration Debug \
-  CODE_SIGN_STYLE=Manual \
-  CODE_SIGN_IDENTITY="Apple Development: <Your Name> (XXXXXXXXXX)" \
-  PROVISIONING_PROFILE_SPECIFIER="" \
-  DEVELOPMENT_TEAM=<TEAMID> \
+xcodebuild \
+  -project SangKey.xcodeproj \
+  -scheme SangKey \
+  -configuration Debug \
+  CODE_SIGNING_ALLOWED=NO \
   build
 ```
 
-Then grant "84Key Dev" Accessibility once. An unsigned build
-(`CODE_SIGNING_ALLOWED=NO`) still runs, but re-prompts after every rebuild.
+An unsigned Debug build is useful for compile/linkage work, but the hosted CI
+intentionally does not exercise real Accessibility or `SMAppService`
+registration because those require user-session TCC/background-item approval.
+The deterministic CI agent smoke skips only the event tap while loading the real
+engine and dictionaries.
+
+## Testing an installed build
+
+For an installed, signed build:
+
+1. Put `SangKey.app` in `/Applications`.
+2. Launch it so the control app can register its bundled LaunchAgent using
+   `SMAppService`.
+3. Approve the background item in **System Settings → General → Login Items** if
+   macOS requires approval.
+4. Grant **Accessibility** to the SangKey input agent under **Privacy & Security →
+   Accessibility**.
+5. Close the control app. `SangKeyAgent` should remain running and typing should
+   continue.
+6. Reopen `SangKey.app` only to change preferences or enable/disable the agent.
+
+Only run one event-based Vietnamese IME at a time. A Debug build and an installed
+release use the same LaunchAgent label/agent identity in v0.4, so do **not**
+register both simultaneously. Disable/unregister the installed agent before live
+Testing a Debug package.
+
+Accessibility persistence depends on stable signed code identity. Release
+packaging explicitly signs `SangKeyAgent` with identifier
+`com.sangtrx.sangkey.agent`; ad-hoc rebuilds are not a substitute for testing the
+real Developer ID artifact before release.
 
 ## Dictionaries
 
@@ -72,21 +91,47 @@ Then grant "84Key Dev" Accessibility once. An unsigned build
 Regenerate with:
 
 ```sh
-python3 tools/gen_dict.py                      # Vietnamese from rules; keep English
+python3 tools/gen_dict.py
 python3 tools/gen_dict.py --english /path/to/google-10000-english.txt
 ```
 
+The production agent resolves these files beside itself in
+`SangKey.app/Contents/Resources`.
+
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs two jobs on push/PR: the C++ engine test harness
-(Ubuntu) and the macOS app build (regenerated via XcodeGen, `CODE_SIGNING_ALLOWED=NO`).
+`.github/workflows/ci.yml` runs two independent jobs on pull requests and `main`:
 
-`.github/workflows/release.yml` runs on a version tag (`v*`): it builds, signs,
-notarizes, and publishes a `.dmg` as a GitHub Release. See [`RELEASE.md`](RELEASE.md).
+- Ubuntu: engine, sanitizer and source/security invariants.
+- macOS 26: Xcode build, launcher/agent linkage audit, embedded dictionary smoke,
+  agent idle-RSS budget, universal `arm64 + x86_64` packaging, nested-code-sign
+  identity verification and DMG verification.
+
+The always-on agent must stay below **30 MiB idle RSS** in the deterministic CI
+smoke and may not link AppKit, ServiceManagement or Swift runtime machinery.
+
+`.github/workflows/release.yml` runs only on a strict version tag and signs,
+notarizes and publishes a universal DMG. See [`RELEASE.md`](RELEASE.md).
 
 ## Packaging / distribution
 
-`tools/package.sh` produces a runnable `.app` and a `.dmg`. Code signing and
-notarization require an Apple Developer account; without one, a locally-signed
-build runs after approving it in System Settings → Privacy & Security. For the
-automated, signed-and-notarized release flow, see [`RELEASE.md`](RELEASE.md).
+Create a local package:
+
+```sh
+bash tools/package.sh
+```
+
+Reproduce the universal release architecture:
+
+```sh
+SANGKEY_ARCHS="arm64 x86_64" bash tools/package.sh
+```
+
+`tools/package.sh` regenerates the Xcode project, builds both products, verifies
+the embedded agent + LaunchAgent descriptor, signs the nested agent first with
+its explicit code identifier, signs the enclosing app, then creates the DMG.
+Without notarization credentials it prints that the local package is not
+notarized.
+
+Code signing and notarization require an Apple Developer account. For the
+automated Developer ID + notarization release flow, see [`RELEASE.md`](RELEASE.md).
