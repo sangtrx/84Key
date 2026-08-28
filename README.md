@@ -45,11 +45,12 @@ SwiftUI, Combine or the Swift runtime.
 
 ## Footprint
 
-The v0.4 CI gate runs the **actual embedded SangKeyAgent** with both English and
-Vietnamese dictionaries loaded, while skipping only the TCC-dependent event tap.
-Its idle RSS must stay below **30 MiB**. The architecture was selected after
-measurement showed the previous AppKit-resident process dominated idle memory;
-rewriting the dictionaries would have saved very little by comparison.
+The v0.4 CI gate runs the **actual embedded SangKeyAgent** with the production
+English detector corpora and Vietnamese dictionary loaded, while skipping only
+the TCC-dependent event tap. Its idle RSS must stay below **30 MiB**. The
+architecture was selected after measurement showed the previous AppKit-resident
+process dominated idle memory; rewriting the dictionaries would have saved very
+little by comparison.
 
 ## Privacy
 
@@ -104,6 +105,7 @@ The DMG itself also contains:
 
 - `LICENSE.txt`
 - `NOTICE.txt`
+- `THIRD_PARTY_DATA.txt` with byte-pinned English detector provenance
 - `SOURCE.txt` pointing to the exact corresponding-source commit.
 
 Verify before installation:
@@ -167,7 +169,7 @@ SANGKEY_ARCHS="arm64 x86_64" bash tools/package.sh
 ## Project layout
 
 - `core/engine/` — OpenKey-derived C++ typing engine.
-- `core/data/` — English/Vietnamese detection dictionaries.
+- `core/data/` — byte-pinned CC0 English detector data, SangKey supplement, and the Vietnamese Telex dictionary.
 - `core/tests/` — engine, typing simulation, ASan/UBSan and parser tests.
 - `platform/macos/Agent/` — always-on headless `SangKeyAgent` + bundled LaunchAgent descriptor.
 - `platform/macos/App/SangKeyApp.mm` — ephemeral AppKit/ServiceManagement control menu.
@@ -184,7 +186,12 @@ SangKey is an independently branded macOS distribution derived from:
 
 - [`nghialuong/84Key`](https://github.com/nghialuong/84Key)
 - [`tuyenvm/OpenKey`](https://github.com/tuyenvm/OpenKey)
-- [`google-10000-english`](https://github.com/first20hours/google-10000-english)
+
+Automatic English detection uses byte-pinned CC0 data from
+[`dariusk/corpora`](https://github.com/dariusk/corpora) plus a small
+SangKey-maintained CC0 supplement. The historical `google-10000-english` payload
+is not tracked or distributed by SangKey v0.4; see
+[`core/data/ENGLISH_WORDS_PROVENANCE.md`](core/data/ENGLISH_WORDS_PROVENANCE.md).
 
 Upstream attribution is preserved in source files and [`NOTICE`](NOTICE). Because
 the typing engine derives from GPLv3-licensed OpenKey, SangKey is distributed
