@@ -144,8 +144,14 @@ jobs:
           BIN="$APP/Contents/MacOS/SangKey"
           AGENT="$APP/Contents/Resources/SangKeyAgent"
           AGENT_PLIST="$APP/Contents/Library/LaunchAgents/com.sangtrx.sangkey.agent.plist"
+          COMMON="$APP/Contents/Resources/english_common_cc0.json"
+          SUPPLEMENT="$APP/Contents/Resources/english_supplement.dat"
           test -x "$AGENT"
           test -f "$AGENT_PLIST"
+          test -f "$COMMON"
+          test -f "$SUPPLEMENT"
+          test ! -e "$APP/Contents/Resources/english_words.dat"
+          test "$(git hash-object "$COMMON")" = '8ec4ea53704dfca63f1ee00852c6bcc15411c49e'
           plutil -lint "$AGENT_PLIST"
           test "$(/usr/libexec/PlistBuddy -c 'Print :BundleProgram' "$AGENT_PLIST")" = 'Contents/Resources/SangKeyAgent'
           lipo "$BIN" -verify_arch arm64 x86_64
@@ -172,8 +178,14 @@ jobs:
           test -d "$MOUNT_APP"
           test -f "$MOUNT/LICENSE.txt"
           test -f "$MOUNT/NOTICE.txt"
+          test -f "$MOUNT/THIRD_PARTY_DATA.txt"
           test -f "$MOUNT/SOURCE.txt"
+          grep -q '8ec4ea53704dfca63f1ee00852c6bcc15411c49e' "$MOUNT/THIRD_PARTY_DATA.txt"
           grep -Fxq "$SANGKEY_SOURCE_URL" "$MOUNT/SOURCE.txt"
+          test -f "$MOUNT_APP/Contents/Resources/english_common_cc0.json"
+          test -f "$MOUNT_APP/Contents/Resources/english_supplement.dat"
+          test ! -e "$MOUNT_APP/Contents/Resources/english_words.dat"
+          test "$(git hash-object "$MOUNT_APP/Contents/Resources/english_common_cc0.json")" = '8ec4ea53704dfca63f1ee00852c6bcc15411c49e'
           codesign --verify --deep --strict --verbose=2 "$MOUNT_APP"
           spctl -a -vv --type execute "$MOUNT_APP"
           hdiutil detach "$MOUNT" >/dev/null
