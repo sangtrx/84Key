@@ -26,6 +26,7 @@ nouns=core/data/english_nouns_cc0.json
 supplement=core/data/english_supplement.dat
 provenance=core/data/ENGLISH_WORDS_PROVENANCE.md
 runner=core/tests/run_tests.sh
+sim=core/tests/typing_sim_test.cpp
 
 if grep -q 'kRepoReleases = @"https://github.com/sangtrx/84Key/releases/latest"' "$app" && \
    grep -q 'Planned canonical post-rename path: https://github.com/sangtrx/SangKey/releases/latest' "$app"; then
@@ -146,11 +147,16 @@ else
   bad "legacy English word-list provenance is still reachable by the product"
 fi
 
-if grep -q 'PRODUCTION_SIM_LOG' "$runner" && \
-   grep -q 'ADVERSARIAL_DICT' "$runner" && \
-   grep -q "grep -Ev 'C-prop|C-order'" "$runner" && \
-   grep -q 'use_adversarial_dict' "$runner" && \
-   grep -q 'typing_sim_test_san' "$runner"; then
+if grep -Fq 'PRODUCTION_SIM_LOG=' "$runner" && \
+   grep -Fq 'ADVERSARIAL_DICT=' "$runner" && \
+   grep -Fq "grep -Ev 'C-prop|C-order'" "$runner" && \
+   grep -Fq "C-prop' \"\$PRODUCTION_SIM_LOG\"" "$runner" && \
+   grep -Fq "C-order' \"\$PRODUCTION_SIM_LOG\"" "$runner" && \
+   grep -Fq 'use_adversarial_dict' "$runner" && \
+   grep -Fq 'SAN_SIM=' "$runner" && \
+   grep -Fq 'env "${SAN_ENV[@]}" "$SAN_SIM"' "$runner" && \
+   grep -Fq 'const int kMinChecked = 20;' "$sim" && \
+   grep -Fq 'const int kMinChecked = 50;' "$sim"; then
   ok "production English behavior and deterministic adversarial compound floors are both gated"
 else
   bad "English collision testing can become corpus-dependent or vacuous"
