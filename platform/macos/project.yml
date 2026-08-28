@@ -12,18 +12,46 @@ settings:
     CLANG_ENABLE_OBJC_ARC: YES
 
 targets:
-  SangKey:
-    type: application
+  SangKeyAgent:
+    type: tool
     platform: macOS
     sources:
-      # Absolute-minimum macOS host: one Objective-C++ AppKit status-menu entry
-      # point plus the Objective-C++ event tap. No Swift/SwiftUI/Combine target.
-      - path: App/SangKeyApp.mm
+      - path: Agent/SangKeyAgent.mm
+      - path: HeadlessCompat/AppKitCompat.mm
+      - path: Shared/SangKeyPreferences.mm
       - path: Input
       - path: ../../core/engine
         name: Engine
         excludes:
           - EngineUpstream.inc
+    dependencies:
+      - sdk: Foundation.framework
+      - sdk: ApplicationServices.framework
+      - sdk: Carbon.framework
+      - sdk: Security.framework
+    settings:
+      base:
+        PRODUCT_NAME: "SangKeyAgent"
+        ENABLE_HARDENED_RUNTIME: YES
+        HEADER_SEARCH_PATHS:
+          # Must precede the SDK framework headers: InputController.mm's inherited
+          # <Cocoa/Cocoa.h> import resolves to the narrow three-API headless adapter.
+          - "$(SRCROOT)/HeadlessCompat"
+          - "$(SRCROOT)/Shared"
+          - "$(SRCROOT)/Input"
+          - "$(SRCROOT)/../../core/engine"
+
+  SangKey:
+    type: application
+    platform: macOS
+    sources:
+      - path: App/SangKeyApp.mm
+      - path: Shared/SangKeyPreferences.mm
+      - path: Agent/com.sangtrx.sangkey.agent.plist
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchAgents
       - path: ../../core/data/english_words.dat
         buildPhase: resources
       - path: ../../core/data/viet_telex.dat
@@ -32,22 +60,28 @@ targets:
         buildPhase: resources
     dependencies:
       - sdk: AppKit.framework
-      - sdk: ApplicationServices.framework
-      - sdk: Carbon.framework
+      - sdk: ServiceManagement.framework
+      - target: SangKeyAgent
+        link: false
+        embed: true
+        codeSign: false
+        copy:
+          destination: wrapper
+          subpath: Contents/Resources
     settings:
       base:
         PRODUCT_NAME: "SangKey"
+        PRODUCT_MODULE_NAME: "SangKey"
         PRODUCT_BUNDLE_IDENTIFIER: com.sangtrx.sangkey
         INFOPLIST_FILE: Resources/Info.plist
-        MARKETING_VERSION: "0.3.0"
-        CURRENT_PROJECT_VERSION: "13"
+        MARKETING_VERSION: "0.4.0"
+        CURRENT_PROJECT_VERSION: "14"
         GENERATE_INFOPLIST_FILE: NO
         ENABLE_HARDENED_RUNTIME: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: NO
         HEADER_SEARCH_PATHS:
-          - "$(SRCROOT)/Input"
-          - "$(SRCROOT)/../../core/engine"
+          - "$(SRCROOT)/Shared"
       configs:
         Debug:
           PRODUCT_NAME: "SangKey (DEV)"
