@@ -139,7 +139,7 @@ jobs:
           export KEY84_VERSION="${GITHUB_REF_NAME#v}"
           bash tools/package.sh
           APP="build/dd/Build/Products/Release/84Key.app"
-          lipo -verify_arch arm64 x86_64 "$APP/Contents/MacOS/84Key"
+          lipo "$APP/Contents/MacOS/84Key" -verify_arch arm64 x86_64
           DMG="84Key-${GITHUB_REF_NAME}.dmg"
           mv build/84Key.dmg "build/$DMG"
           test ! -e "$APP/Contents/Frameworks/Sparkle.framework"
