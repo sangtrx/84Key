@@ -75,7 +75,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Verify ultra-light runtime linkage and idle footprint
+      - name: Verify ultra-light runtime linkage and isolate idle RSS
         run: |
           set -euo pipefail
           APP=$(find "$HOME/Library/Developer/Xcode/DerivedData" -path '*/Build/Products/Debug/SangKey (DEV).app' -print -quit)
@@ -100,25 +100,44 @@ jobs:
           echo "Debug app: ${APP_KIB} KiB"
           echo "Debug real payload: ${REAL_BYTES} bytes"
 
-          echo "== idle footprint smoke =="
-          LOG="$RUNNER_TEMP/sangkey-idle.log"
-          SANGKEY_CI_SMOKE=1 "$ENTRY" >"$LOG" 2>&1 &
-          PID=$!
-          trap 'kill "$PID" 2>/dev/null || true' EXIT
-          sleep 3
-          if ! kill -0 "$PID" 2>/dev/null; then
-            cat "$LOG"
-            echo "ERROR: SangKey exited during idle footprint smoke" >&2
-            exit 1
-          fi
-          RSS_KIB=$(ps -o rss= -p "$PID" | awk '{print $1}')
-          CPU_PCT=$(ps -o %cpu= -p "$PID" | awk '{print $1}')
-          test -n "$RSS_KIB"
-          echo "SangKey idle RSS with status menu + dictionaries: ${RSS_KIB} KiB"
-          echo "SangKey idle CPU snapshot: ${CPU_PCT}%"
-          kill "$PID"
-          wait "$PID" || true
-          trap - EXIT
+          measure_idle() {
+            local label="$1"
+            shift
+            local slug
+            slug=$(printf '%s' "$label" | tr ' ' '-')
+            local log="$RUNNER_TEMP/sangkey-${slug}.log"
+            env "$@" "$ENTRY" >"$log" 2>&1 &
+            local pid=$!
+            sleep 3
+            if ! kill -0 "$pid" 2>/dev/null; then
+              cat "$log" >&2
+              echo "ERROR: SangKey exited during ${label} footprint smoke" >&2
+              return 1
+            fi
+            local rss cpu
+            rss=$(ps -o rss= -p "$pid" | awk '{print $1}')
+            cpu=$(ps -o %cpu= -p "$pid" | awk '{print $1}')
+            test -n "$rss"
+            echo "${label}: ${rss} KiB RSS; ${cpu}% CPU snapshot" >&2
+            kill "$pid"
+            wait "$pid" || true
+            printf '%s\n' "$rss"
+          }
+
+          echo "== idle RSS isolation =="
+          BASE_RSS=$(measure_idle "host without dictionaries" SANGKEY_CI_SMOKE=1 SANGKEY_CI_SMOKE_BASELINE=1)
+          FULL_RSS=$(measure_idle "host with dictionaries" SANGKEY_CI_SMOKE=1)
+          DICT_DELTA=$((FULL_RSS - BASE_RSS))
+          echo "Dictionary RSS delta: ${DICT_DELTA} KiB (${BASE_RSS} -> ${FULL_RSS} KiB)"
+
+          {
+            echo "### SangKey idle RSS isolation"
+            echo "| State | RSS KiB |"
+            echo "| --- | ---: |"
+            echo "| AppKit + engine, dictionaries skipped | ${BASE_RSS} |"
+            echo "| AppKit + engine + both dictionaries | ${FULL_RSS} |"
+            echo "| Dictionary delta | ${DICT_DELTA} |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Smoke-test universal Release DMG packaging
         env:
