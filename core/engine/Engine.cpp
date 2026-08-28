@@ -29,15 +29,17 @@ void vKeyHandleEvent(const vKeyEvent& event,
                      const Uint8& capsStatus,
                      const bool& otherControlKey) {
     // The upstream engine already has a fully tested number-boundary path for a
-    // shifted number. Reuse that exact path for an unshifted mid-word number in
-    // Telex-style modes by presenting only the engine with a synthetic Shift
-    // state. The physical event is untouched: the macOS host still emits the
-    // actual digit, and tests pass the actual literal trigger character.
+    // shifted number. Reuse that exact path for a physical *unshifted* mid-word
+    // number in Telex-style modes by presenting only the engine with a synthetic
+    // Shift state. Caps Lock (status 2) still produces a digit on the number row,
+    // so it belongs here too; real Shift (status 1) is deliberately excluded and
+    // keeps upstream's punctuation behavior (!/@/#/...). The physical event is
+    // untouched: the macOS host still emits the user's actual character.
     const bool telexDigitBoundary =
         event == vKeyEvent::Keyboard &&
         state == vKeyEventState::KeyDown &&
         IS_NUMBER_KEY(data) &&
-        capsStatus == 0 &&
+        capsStatus != 1 &&
         vInputType != vVNI &&
         _index > 0;
 
