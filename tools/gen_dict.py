@@ -19,6 +19,7 @@ any non A-Z/a-z byte and lowercase the result.
 
 Usage (run from repo root):
   python3 tools/gen_dict.py
+  python3 tools/gen_dict.py --dry-run
   python3 tools/gen_dict.py --report-collisions
 """
 import argparse
@@ -206,6 +207,8 @@ def write(path, words):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--dry-run", action="store_true",
+                    help="generate in memory and validate production sources without writing viet_telex.dat")
     ap.add_argument("--report-collisions", action="store_true",
                     help="print generated Vietnamese spellings that collide with production English tokens")
     args = ap.parse_args()
@@ -214,8 +217,11 @@ def main():
     print(f"production English detector: {len(english)} unique ASCII tokens")
 
     viet = gen_viet(english)
-    write(os.path.join(DATA, "viet_telex.dat"), viet)
-    print(f"viet_telex.dat:             {len(viet)} syllables")
+    if args.dry_run:
+        print(f"viet_telex.dat:             {len(viet)} syllables (dry-run; not written)")
+    else:
+        write(os.path.join(DATA, "viet_telex.dat"), viet)
+        print(f"viet_telex.dat:             {len(viet)} syllables")
 
     if args.report_collisions:
         collide = sorted(viet & english)
