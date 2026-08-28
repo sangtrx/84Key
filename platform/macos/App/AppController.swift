@@ -69,15 +69,17 @@ final class AppController: ObservableObject {
     }
 
     /// Re-check permission and (re)start the tap if it isn't running yet. Returns
-    /// whether the tap is now running.
+    /// whether the tap is now running. A live event tap is stronger evidence than
+    /// AXIsProcessTrusted(), which can lag after the user changes TCC settings, so
+    /// never leave the UI saying permission is missing while typing already works.
     @discardableResult
     func refresh() -> Bool {
-        hasPermission = input.hasAccessibilityPermission()
         if !input.isRunning() {
             _ = input.start()
         }
         let running = input.isRunning()
         isRunning = running
+        hasPermission = running || input.hasAccessibilityPermission()
         if running {
             onboarding?.dismiss()
             onboarding = nil
