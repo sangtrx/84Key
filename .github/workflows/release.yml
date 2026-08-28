@@ -110,7 +110,9 @@ jobs:
           KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
           KEYCHAIN_PW="$(openssl rand -base64 24)"
           CERT_PATH="$RUNNER_TEMP/devid.p12"
-          printf '%s' "$CERT_P12" | base64 --decode > "$CERT_PATH"
+          # This job always runs on macOS. Use BSD base64's native decode flag;
+          # GNU-only `--decode` is not portable to the hosted macOS runner.
+          printf '%s' "$CERT_P12" | /usr/bin/base64 -D > "$CERT_PATH"
           chmod 600 "$CERT_PATH"
           security create-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
@@ -125,7 +127,7 @@ jobs:
           ASC_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
         run: |
           set -euo pipefail
-          printf '%s' "$ASC_KEY_P8" | base64 --decode > "$RUNNER_TEMP/asc.p8"
+          printf '%s' "$ASC_KEY_P8" | /usr/bin/base64 -D > "$RUNNER_TEMP/asc.p8"
           chmod 600 "$RUNNER_TEMP/asc.p8"
 
       - name: Build signed and notarized universal DMG
