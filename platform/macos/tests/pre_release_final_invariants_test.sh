@@ -69,6 +69,13 @@ else
   bad "release can sign from unprotected Git refs"
 fi
 
+if [ "$(grep -c '^[[:space:]]*environment: release$' "$release")" -ge 2 ] && \
+   grep -q 'test that exact DMG on' "$release"; then
+  ok "signed artifact requires a second protected-environment approval before publish"
+else
+  bad "public publish lacks a post-build human acceptance gate"
+fi
+
 if grep -q 'spctl -a -t open --context context:primary-signature' "$package" && \
    grep -q 'spctl -a -vv --type execute' "$release"; then
   ok "notarized DMG and mounted app must pass Gatekeeper assessment"
