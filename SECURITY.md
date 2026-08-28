@@ -82,9 +82,10 @@ CI inspects both final Mach-O binaries using `otool -L`:
 - the always-on agent fails if it links AppKit, ServiceManagement, SwiftUI,
   Combine or the Swift runtime.
 
-The CI smoke runs the actual embedded agent with both production dictionaries
-loaded while skipping only the TCC-dependent event tap. Idle RSS must remain
-below **30 MiB**, and CPU is reported for every macOS build.
+The CI smoke runs the actual embedded agent with the production English detector
+corpora, SangKey supplement, and Vietnamese dictionary loaded while skipping only
+the TCC-dependent event tap. Idle RSS must remain below **30 MiB**, and CPU is
+reported for every macOS build.
 
 ## Distribution hardening
 
@@ -105,8 +106,10 @@ The release workflow separates privileges and fails closed:
 - signing material is destroyed before artifact handoff;
 - notarized artifacts must pass `stapler` validation and Gatekeeper `spctl`
   assessment before publication;
-- each DMG carries `LICENSE.txt`, `NOTICE.txt`, and `SOURCE.txt` pointing to the
-  exact corresponding-source commit;
+- each DMG carries `LICENSE.txt`, `NOTICE.txt`, `THIRD_PARTY_DATA.txt`, and
+  `SOURCE.txt` pointing to the exact corresponding-source commit;
+- release CI verifies the byte-pinned English detector corpus hashes in both the
+  built app and the mounted DMG before publication;
 - each release publishes a notarized universal (`arm64` + `x86_64`) launcher and
   agent inside the DMG together with `SHA256SUMS`.
 
