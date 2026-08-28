@@ -57,3 +57,4 @@ bash ../../platform/macos/tests/send_invariants_test.sh
 
 # Privacy / supply-chain invariants that can be checked on Linux as source.
 bash ../../platform/macos/tests/security_invariants_test.sh
+bash ../../platform/macos/tests/pre_release_final_invariants_test.sh
