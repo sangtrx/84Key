@@ -94,8 +94,14 @@ check "grep -q 'AGENT_IDENTIFIER=\"com.sangtrx.sangkey.agent\"' '$package' && gr
       "agent signing identifier is explicit and read back"
 check "grep -q 'SANGKEY_REQUIRE_DEVELOPER_ID' '$package' && grep -q 'Developer ID Application:' '$package' && grep -q 'TeamIdentifier' '$package' && grep -q 'DEVELOPER_ID_TEAM_ID' '$release'" \
       "public release requires Developer ID and expected TeamIdentifier"
-check "grep -q 'github.ref_protected' '$release' && grep -q 'branches/main' '$release' && grep -q 'main is not protected' '$release'" \
-      "release refuses unprotected main/tag provenance"
+if grep -Fq 'git fetch --no-tags origin main:refs/remotes/origin/main' "$release" && \
+   grep -Fq 'test "$MAIN_SHA" = "$GITHUB_SHA"' "$release" && \
+   ! grep -Fq 'github.ref_protected' "$release" && \
+   ! grep -Fq 'main is not protected' "$release"; then
+  ok "release requires exact-current-main provenance without GitHub rulesets"
+else
+  bad "release exact-main provenance regressed or GitHub protection became mandatory again"
+fi
 check "grep -q 'XCODE=/Applications/Xcode_26.6.app' '$ci' && grep -q 'Build version 17F113' '$ci' && grep -q 'XCODE=/Applications/Xcode_26.6.app' '$release' && grep -q 'Build version 17F113' '$release'" \
       "CI and release pin Xcode 26.6 build 17F113"
 

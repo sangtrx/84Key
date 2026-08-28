@@ -69,17 +69,18 @@ else
   bad "release signer identity is not fail-closed"
 fi
 
-if grep -q 'github.ref_protected' "$release" && \
-   grep -q 'branches/main' "$release" && \
-   grep -q 'main is not protected' "$release"; then
-  ok "release refuses unprotected tag/main provenance"
+if grep -Fq 'git fetch --no-tags origin main:refs/remotes/origin/main' "$release" && \
+   grep -Fq 'test "$MAIN_SHA" = "$GITHUB_SHA"' "$release" && \
+   ! grep -Fq 'github.ref_protected' "$release" && \
+   ! grep -Fq 'main is not protected' "$release"; then
+  ok "release requires the tag to equal exact current main without requiring GitHub rulesets"
 else
-  bad "release can sign from unprotected Git refs"
+  bad "release provenance is either weaker than exact-main or still requires repository protection"
 fi
 
 if [ "$(grep -c '^[[:space:]]*environment: release$' "$release")" -ge 2 ] && \
    grep -q 'test that exact DMG on' "$release"; then
-  ok "signed artifact requires a second protected-environment approval before publish"
+  ok "signed artifact requires a second release-environment approval before publish"
 else
   bad "public publish lacks a post-build human acceptance gate"
 fi
