@@ -13,15 +13,16 @@ bad() { echo "  [FAIL] $1"; fail=$((fail + 1)); }
 echo "== hardened distribution security invariants =="
 
 # 1. No embedded auto-updater / installer framework or appcast configuration.
-if grep -R -n -E 'import Sparkle|package: Sparkle|SUFeedURL|SUPublicEDKey|SPUStandardUpdaterController' \
+if grep -R -n -E 'import Sparkle|package: Sparkle|SUFeedURL|SUPublicEDKey|SPUStandardUpdaterController|Starts Sparkle' \
     platform/macos/project.yml \
     platform/macos/Resources/Info.plist \
     platform/macos/App/UpdaterController.swift \
+    platform/macos/App/Key84App.swift \
     tools/package.sh \
     .github/workflows/release.yml >/dev/null 2>&1; then
   bad "auto-updater/install-helper references are present"
 else
-  ok "no embedded auto-updater or appcast configuration"
+  ok "no embedded auto-updater, appcast, or stale Sparkle launch path"
 fi
 
 # 2. The user-visible update action may navigate to Releases, but it must not
@@ -175,6 +176,43 @@ if grep -Fq '#define CHR(index) (((index) >= 0 && (index) < MAX_BUFF)' core/engi
   ok "legacy character-buffer accessor is bounds checked"
 else
   bad "CHR() can read outside the typing buffer"
+fi
+
+# 16. The secret-bearing release job runs on macOS, whose system base64 utility
+#     uses BSD's -D decode flag. Keep the real decoder command in CI as a smoke
+#     test so a GNU-only --decode regression cannot survive until a release tag.
+if grep -q '/usr/bin/base64 -D' "$release" && \
+   grep -q 'Smoke-test release credential decoder' .github/workflows/ci.yml && \
+   grep -q '/usr/bin/base64 -D' .github/workflows/ci.yml && \
+   ! grep -q 'base64 --decode' "$release"; then
+  ok "release credential decoding is macOS-native and smoke tested"
+else
+  bad "release credentials rely on an untested/non-portable base64 decoder"
+fi
+
+# 17. SMAppService is authoritative for Run at Login. Registration may fail or
+#     require approval, so the persisted checkbox must be reconciled to the
+#     effective service state rather than remaining falsely enabled.
+if grep -q 'static func sync(enabled: Bool) -> Bool' platform/macos/App/LoginItemManager.swift && \
+   grep -q 'return service.status == .enabled' platform/macos/App/LoginItemManager.swift && \
+   grep -q 'effectiveLoginState = LoginItemManager.sync' platform/macos/App/AppController.swift && \
+   grep -q 'AppSettings.shared.runOnStartup = effective' platform/macos/App/AppController.swift; then
+  ok "Run at Login UI follows the effective SMAppService state"
+else
+  bad "Run at Login can display a state macOS rejected"
+fi
+
+# 18. The onboarding NSWindow opts out of AppKit auto-release so its controller
+#     must explicitly drop the strong reference when the user presses the red
+#     close button. Otherwise the hidden SwiftUI hosting tree lives forever in
+#     this long-running menu-bar process.
+onboarding=platform/macos/App/OnboardingView.swift
+close_block=$(awk '/func windowWillClose\(_ notification: Notification\)/,/^    }/' "$onboarding")
+if echo "$close_block" | grep -q 'closingWindow.delegate = nil' && \
+   echo "$close_block" | grep -q 'window = nil'; then
+  ok "closing onboarding releases its retained window and hosting tree"
+else
+  bad "onboarding can retain a hidden window for the process lifetime"
 fi
 
 echo
