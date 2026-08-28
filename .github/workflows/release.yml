@@ -58,6 +58,7 @@ jobs:
     needs: preflight
     runs-on: macos-26
     timeout-minutes: 45
+    # First protected-environment approval authorizes use of Apple credentials.
     environment: release
     permissions:
       contents: read
@@ -205,6 +206,11 @@ jobs:
     name: Publish GitHub Release
     needs: build-sign-notarize
     runs-on: ubuntu-24.04
+    # Second approval on the same protected environment is intentional: after
+    # build-sign-notarize uploads the notarized artifact, test that exact DMG on
+    # a clean Mac (SMAppService, Accessibility, close/relogin, disable/enable)
+    # before approving this public-publish job.
+    environment: release
     permissions:
       contents: write
     steps:
