@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import Darwin
 
 /// Owns the input controller and coordinates startup, the Accessibility-permission
 /// lifecycle, and the run-at-login item. Publishes `isRunning` / `hasPermission`
@@ -24,6 +25,13 @@ final class AppController: ObservableObject {
     private var onboarding: OnboardingController?
 
     func startup() {
+        // The imported OpenKey host contains an opt-in KEY84_TRACE diagnostic
+        // path that can log virtual keycodes. It is useful to upstream
+        // development but is not acceptable in this hardened distribution.
+        // Scrub the variable before the event tap can receive its first key so
+        // even a process launched with KEY84_TRACE=1 cannot enable that path.
+        unsetenv("KEY84_TRACE")
+
         let settings = AppSettings.shared
         settings.attach(input)
 

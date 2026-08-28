@@ -1,6 +1,6 @@
 name: 84Key
 options:
-  bundleIdPrefix: com.nghialuong
+  bundleIdPrefix: com.sangtrx
   deploymentTarget:
     macOS: "14.0"
   createIntermediateGroups: true
@@ -11,14 +11,6 @@ settings:
     CLANG_CXX_LIBRARY: "libc++"
     CLANG_ENABLE_OBJC_ARC: YES
     SWIFT_VERSION: "5.0"
-
-packages:
-  # Sparkle drives in-app auto-update: it reads the appcast feed (SUFeedURL),
-  # verifies the EdDSA signature (SUPublicEDKey) of the downloaded DMG, and
-  # installs it. See docs/RELEASE.md for the appcast/keys setup.
-  Sparkle:
-    url: https://github.com/sparkle-project/Sparkle
-    from: "2.6.0"
 
 targets:
   84Key:
@@ -40,24 +32,22 @@ targets:
       - path: Resources/Assets.xcassets
         buildPhase: resources
     dependencies:
-      # Carbon provides the Text Input Source (TIS) APIs used by the event tap
-      # to honor the "turn off Vietnamese in other layouts" option. Other
-      # CoreGraphics/AppKit/ApplicationServices symbols resolve via the SDK
-      # umbrella through Cocoa.
+      # Carbon provides Text Input Source APIs and Secure Event Input behavior.
       - sdk: Carbon.framework
-      # ServiceManagement provides SMAppService for the run-at-login feature.
+      # ServiceManagement provides SMAppService for the opt-in run-at-login feature.
       - sdk: ServiceManagement.framework
-      # Sparkle auto-updater framework (embedded into the .app bundle).
-      - package: Sparkle
     settings:
       base:
         PRODUCT_NAME: "84Key"
         PRODUCT_MODULE_NAME: "Key84"
-        PRODUCT_BUNDLE_IDENTIFIER: com.nghialuong.key84
+        # The hardened fork deliberately uses its own identity. Sharing the
+        # upstream bundle id across different signing teams creates confusing TCC
+        # grants and makes provenance harder to reason about.
+        PRODUCT_BUNDLE_IDENTIFIER: com.sangtrx.key84
         INFOPLIST_FILE: Resources/Info.plist
         SWIFT_OBJC_BRIDGING_HEADER: Bridge/Key84-Bridging-Header.h
-        MARKETING_VERSION: "0.1.9"
-        CURRENT_PROJECT_VERSION: "11"
+        MARKETING_VERSION: "0.2.0"
+        CURRENT_PROJECT_VERSION: "12"
         GENERATE_INFOPLIST_FILE: NO
         ENABLE_HARDENED_RUNTIME: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -66,15 +56,11 @@ targets:
           - "$(SRCROOT)/Bridge"
           - "$(SRCROOT)/../../core/engine"
       configs:
-        # Debug runs as a distinct app ("84Key (DEV)", separate bundle id) so a dev
-        # build can be granted Accessibility on its own — without disturbing an
-        # installed release's grant or sharing its UserDefaults. It also uses the
-        # AppIcon-Dev icon set (red "DEV" badge) so the two entries are
-        # unmistakable in System Settings > Accessibility. NOTE: only one
-        # Vietnamese IME can run at a time; quit the release before testing Debug.
+        # Debug runs as a distinct app so its Accessibility grant cannot be
+        # confused with the signed release build.
         Debug:
           PRODUCT_NAME: "84Key (DEV)"
-          PRODUCT_BUNDLE_IDENTIFIER: com.nghialuong.key84.debug
+          PRODUCT_BUNDLE_IDENTIFIER: com.sangtrx.key84.debug
           ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon-Dev
 
 schemes:

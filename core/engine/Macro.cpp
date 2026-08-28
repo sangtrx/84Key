@@ -12,6 +12,7 @@
 #include <iostream>
 #include <memory.h>
 #include <fstream>
+#include <cstddef>
 
 using namespace std;
 
@@ -25,6 +26,10 @@ static bool _macroFlag = false;
 static Uint16 _kChar = 0;
 static Uint32 _charBuff;
 static int _kMacro;
+
+static bool canRead(const size_t cursor, const size_t length, const size_t totalSize) {
+    return cursor <= totalSize && length <= totalSize - cursor;
+}
 
 static void convert(const string& str, vector<Uint32>& outData) {
     outData.clear();
@@ -79,22 +84,43 @@ static void convert(const string& str, vector<Uint32>& outData) {
  */
 void initMacroMap(const Byte* pData, const int& size) {
     macroMap.clear();
+    if (pData == NULL || size < 2)
+        return;
+
+    const size_t totalSize = static_cast<size_t>(size);
+    size_t cursor = 0;
     Uint16 macroCount = 0;
-    Uint32 cursor = 0;
-    if (size >= 2) {
-        memcpy(&macroCount, pData + cursor, 2);
-        cursor+=2;
-    }
-    Uint8 macroTextSize;
-    Uint16 macroContentSize;
-    for (int i = 0; i < macroCount; i++) {
-        macroTextSize = pData[cursor++];
-        string macroText((char*)pData + cursor, macroTextSize);
+    memcpy(&macroCount, pData + cursor, sizeof(macroCount));
+    cursor += sizeof(macroCount);
+
+    for (Uint16 i = 0; i < macroCount; i++) {
+        // Fail closed on a malformed/truncated record. Do not keep a partially
+        // parsed macro table because a caller cannot distinguish it from a
+        // complete import and could persist attacker-controlled partial state.
+        if (!canRead(cursor, sizeof(Uint8), totalSize)) {
+            macroMap.clear();
+            return;
+        }
+        const Uint8 macroTextSize = pData[cursor++];
+        if (!canRead(cursor, macroTextSize, totalSize)) {
+            macroMap.clear();
+            return;
+        }
+        string macroText(reinterpret_cast<const char*>(pData + cursor), macroTextSize);
         cursor += macroTextSize;
-        
-        memcpy(&macroContentSize, pData + cursor, 2);
-        cursor+=2;
-        string macroContent((char*)pData + cursor, macroContentSize);
+
+        if (!canRead(cursor, sizeof(Uint16), totalSize)) {
+            macroMap.clear();
+            return;
+        }
+        Uint16 macroContentSize = 0;
+        memcpy(&macroContentSize, pData + cursor, sizeof(macroContentSize));
+        cursor += sizeof(macroContentSize);
+        if (!canRead(cursor, macroContentSize, totalSize)) {
+            macroMap.clear();
+            return;
+        }
+        string macroContent(reinterpret_cast<const char*>(pData + cursor), macroContentSize);
         cursor += macroContentSize;
         
         MacroData data;
