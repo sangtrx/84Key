@@ -20,11 +20,18 @@ core typing logic that makes accurate Vietnamese input possible.
 Third-party data
 ----------------
 
-1. English word list
-   Source: google-10000-english
-   (https://github.com/first20hours/google-10000-english)
-   License: Public domain / MIT.
-   Used to power SangKey's automatic English-word detection.
+1. English common-word corpus
+   Source: Darius Kazemi Corpora, data/words/common.json
+   https://github.com/dariusk/corpora
+   Pinned upstream commit: cf30ca27ab176b63623af1ddcfa2447ac07305ba
+   Pinned Git blob: 8ec4ea53704dfca63f1ee00852c6bcc15411c49e
+   License: Creative Commons CC0 1.0 Universal.
+   Used as the auditable common-word base for automatic English detection.
+
+   The small SangKey-maintained English detector supplement is kept separately
+   in core/data/english_supplement.dat and is dedicated to CC0 1.0 by SangKey
+   contributors to the extent they hold copyright or related database rights.
+   See core/data/ENGLISH_WORDS_PROVENANCE.md for exact provenance.
 
 2. Vietnamese syllable dictionary
    The Vietnamese-by-Telex syllable dictionary is generated from linguistic
@@ -39,7 +46,10 @@ opens the project's GitHub Releases page only after an explicit user action.
 Release-build tooling such as XcodeGen is not linked into the application and is
 covered by its own upstream license.
 
-Public DMGs include LICENSE.txt, NOTICE.txt and SOURCE.txt. SOURCE.txt identifies
-the exact corresponding-source commit for that binary distribution.
+Public DMGs include LICENSE.txt, NOTICE.txt, THIRD_PARTY_DATA.txt and SOURCE.txt.
+SOURCE.txt identifies the exact corresponding-source commit for that binary
+distribution. THIRD_PARTY_DATA.txt records the reviewed English detector data
+provenance.
 
-All SangKey changes are distributed under GPLv3.
+All SangKey code changes are distributed under GPLv3 unless a file explicitly
+states a different compatible data/content dedication.
