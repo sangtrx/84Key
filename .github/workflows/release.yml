@@ -134,6 +134,7 @@ jobs:
             exit 1
           fi
           codesign --verify --strict --verbose=2 "$AGENT"
+          test "$(codesign -d --verbose=4 "$AGENT" 2>&1 | awk -F= '/^Identifier=/{print $2; exit}')" = 'com.sangtrx.sangkey.agent'
           codesign --verify --deep --strict --verbose=2 "$APP"
           DMG="SangKey-${GITHUB_REF_NAME}.dmg"
           mv build/SangKey.dmg "build/$DMG"
