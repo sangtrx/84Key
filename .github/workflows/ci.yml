@@ -173,6 +173,7 @@ jobs:
           echo "Agent architectures: $(lipo "$AGENT" -archs)"
           echo "Release footprint: $(du -sk "$APP" | awk '{print $1}') KiB app; $(stat -f '%z' "$BIN") byte launcher; $(stat -f '%z' "$AGENT") byte agent"
           codesign --verify --strict --verbose=2 "$AGENT"
+          test "$(codesign -d --verbose=4 "$AGENT" 2>&1 | awk -F= '/^Identifier=/{print $2; exit}')" = 'com.sangtrx.sangkey.agent'
           codesign --verify --deep --strict --verbose=2 "$APP"
           codesign --verify --verbose=2 "$DMG"
           hdiutil verify "$DMG"
